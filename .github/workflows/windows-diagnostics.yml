@@ -1,6 +1,11 @@
 name: Windows download diagnostics
 on:
   workflow_dispatch:
+    inputs:
+      source_delay:
+        description: Seconds between fixture chunks
+        type: string
+        default: '.003'
 permissions:
   contents: read
 jobs:
@@ -12,7 +17,7 @@ jobs:
       GOTELEMETRY: off
       PYTHONUTF8: '1'
       WIRECTL_DOWNLOAD_DIAGNOSTICS: '1'
-      WIRECTL_TEST_SOURCE_DELAY: '.01'
+      WIRECTL_TEST_SOURCE_DELAY: ${{ inputs.source_delay || '.003' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

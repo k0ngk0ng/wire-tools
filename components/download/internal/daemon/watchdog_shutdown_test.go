@@ -38,7 +38,11 @@ func TestWatchdogFlushesAria2SessionBeforeProtocolShutdown(t *testing.T) {
 		methods = append(methods, request.Method)
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"jsonrpc":"2.0","id":"wirectl","result":"OK"}`)
+		if request.Method == "aria2.tellActive" || request.Method == "aria2.tellWaiting" {
+			fmt.Fprint(w, `{"result":[]}`)
+		} else {
+			fmt.Fprint(w, `{"jsonrpc":"2.0","id":"wirectl","result":"OK"}`)
+		}
 	}))
 	defer server.Close()
 	_, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
@@ -58,7 +62,7 @@ func TestWatchdogFlushesAria2SessionBeforeProtocolShutdown(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(methods) != 2 || methods[0] != "aria2.saveSession" || methods[1] != "aria2.forceShutdown" {
+	if strings.Join(methods, ",") != "aria2.tellActive,aria2.tellWaiting,aria2.forcePauseAll,aria2.tellActive,aria2.saveSession,aria2.forceShutdown" {
 		t.Fatalf("shutdown RPC order: %v", methods)
 	}
 	if strings.Contains(strings.Join(spec.Args, " "), secret) {

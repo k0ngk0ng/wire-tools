@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -62,6 +63,9 @@ func stopEngineProtocol(spec engineSpec) bool {
 	// forceShutdown aborts active transfers promptly and still runs aria2's
 	// shutdown/session persistence. Windows does not support POSIX SIGTERM;
 	// waiting on that signal would let an orphan finish and prune its session.
+	if err = freezeAria2BeforeShutdown(ctx, aria, filepath.Dir(path)); err != nil {
+		return false
+	}
 	saved := aria.SaveSession(ctx) == nil
 	stopped := aria.Call(ctx, "forceShutdown", nil, nil) == nil
 	return saved && stopped

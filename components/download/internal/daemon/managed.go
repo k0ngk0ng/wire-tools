@@ -107,7 +107,12 @@ func OpenManaged(ctx context.Context, dir string) (result *Managed, err error) {
 			p.stop()
 			return nil, nil, err
 		}
-		return engine.NewAria2(c.Aria2Port, c.Secret), p.stop, nil
+		backend := engine.NewAria2(c.Aria2Port, c.Secret)
+		if err = resumeAria2AfterShutdown(ready, backend, filepath.Join(dir, "aria2")); err != nil {
+			p.stop()
+			return nil, nil, err
+		}
+		return backend, p.stop, nil
 	}}
 	amule := &lazyBackend{factory: func(ctx context.Context) (engine.Backend, func(), error) {
 		if _, err := exec.LookPath(c.AMuledBinary); err != nil {

@@ -49,7 +49,7 @@ class DownloadAPI(unittest.TestCase):
                         s.wfile.write(PAYLOAD[p:p + 8192])
                         s.wfile.flush()
                         time.sleep(float(os.environ.get("WIRECTL_TEST_SOURCE_DELAY", ".003")))
-                except (BrokenPipeError, ConnectionResetError):
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     pass
             def log_message(*args):
                 pass
