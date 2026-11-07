@@ -186,7 +186,7 @@ _wirectl_download_completion() {
         if [[ "$cur" == -* ]]; then
             _wirectl_download_values "$cur" "--data-dir --help -h"
         else
-            _wirectl_download_values "$cur" "search add login logout init version list watch pause resume remove daemon doctor bt emule completion"
+            _wirectl_download_values "$cur" "search add login logout init version list watch pause resume remove doctor bt emule completion"
         fi
         return
     fi
@@ -257,16 +257,6 @@ _wirectl_download_completion() {
             ;;
         list)
             [[ "$cur" == -* ]] && _wirectl_download_values "$cur" "--json --help -h"
-            return
-            ;;
-        daemon)
-            if [[ -z "$nested" ]]; then
-                if [[ "$cur" == -* ]]; then
-                    _wirectl_download_values "$cur" "--help -h"
-                else
-                    _wirectl_download_values "$cur" "run start stop restart status"
-                fi
-            fi
             return
             ;;
         servers)
@@ -431,7 +421,7 @@ _wirectl_download_completion() {
         if [[ "$cur" == -* ]]; then
             _wirectl_download_values "$cur" --data-dir --help -h
         else
-            _wirectl_download_values "$cur" search add login logout init version list watch pause resume remove daemon doctor bt emule completion
+            _wirectl_download_values "$cur" search add login logout init version list watch pause resume remove doctor bt emule completion
         fi
         return
     fi
@@ -495,16 +485,6 @@ _wirectl_download_completion() {
             ;;
         list)
             [[ "$cur" == -* ]] && _wirectl_download_values "$cur" --json --help -h
-            return
-            ;;
-        daemon)
-            if [[ -z "$nested" ]]; then
-                if [[ "$cur" == -* ]]; then
-                    _wirectl_download_values "$cur" --help -h
-                else
-                    _wirectl_download_values "$cur" run start stop restart status
-                fi
-            fi
             return
             ;;
         servers)
@@ -632,7 +612,7 @@ function __wirectl_download_complete
         if string match -q -- '-*' "$current"
             __wirectl_download_values --data-dir --help -h
         else
-            __wirectl_download_values search add login logout init version list watch pause resume remove daemon doctor bt emule completion
+            __wirectl_download_values search add login logout init version list watch pause resume remove doctor bt emule completion
         end
         return
     end
@@ -686,15 +666,6 @@ function __wirectl_download_complete
             return
         case list
             string match -q -- '-*' "$current"; and __wirectl_download_values --json --help -h
-            return
-        case daemon
-            if test -z "$nested"
-                if string match -q -- '-*' "$current"
-                    __wirectl_download_values --help -h
-                else
-                    __wirectl_download_values run start stop restart status
-                end
-            end
             return
         case servers
             if test -z "$nested"

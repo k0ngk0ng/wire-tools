@@ -127,7 +127,7 @@ func TestBashCompletionContexts(t *testing.T) {
 		at    int
 		want  string
 	}{
-		{name: "daemon restart", words: []string{"wirectl", "download", "daemon", "re"}, at: 3, want: "restart"},
+		{name: "doctor command", words: []string{"wirectl", "download", "do"}, at: 2, want: "doctor"},
 		{name: "standalone command", words: []string{"wirectl-download", "se"}, at: 1, want: "search"},
 		{name: "root dispatch", words: []string{"wirectl", "dow"}, at: 1, want: "download"},
 		{name: "data dir value is skipped", words: []string{"wirectl-download", "--data-dir", ".cache", "se"}, at: 3, want: "search"},
@@ -210,4 +210,16 @@ func bashFilePath(value string) string {
 		return fmt.Sprintf("/%s/%s", strings.ToLower(path[:1]), path[3:])
 	}
 	return path
+}
+
+func TestCompletionOmitsManualLifecycle(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh", "fish"} {
+		script, err := completionScript(shell)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(script, "daemon") {
+			t.Fatalf("%s still advertises manual process management", shell)
+		}
+	}
 }
