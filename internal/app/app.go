@@ -18,6 +18,7 @@ import (
 	downloadcmd "github.com/k0ngk0ng/wire-tools/components/download/command"
 	talkcmd "github.com/k0ngk0ng/wire-tools/components/talk/command"
 	"github.com/k0ngk0ng/wire-tools/internal/host"
+	"github.com/k0ngk0ng/wire-tools/internal/state"
 	"github.com/k0ngk0ng/wire-tools/internal/update"
 )
 
@@ -240,8 +241,14 @@ func updateCommand(ctx context.Context, c *api.Client, args []string) error {
 	}
 	deadline := time.Now().Add(45 * time.Second)
 	for {
+		// An endpoint may remain after Windows denies its deletion during
+		// a concurrent read. The runtime lock is held through all cleanup.
+		if release, err := state.Lock(c.Home); err == nil {
+			release()
+			break
+		}
 		current, err := c.Endpoint()
-		if err != nil || current.Token != old.Token {
+		if err == nil && current.Token != old.Token {
 			break
 		}
 		if time.Now().After(deadline) {

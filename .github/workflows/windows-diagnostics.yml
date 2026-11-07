@@ -62,6 +62,8 @@ jobs:
           go build -tags talk_test_audio -o bin/wirectl.exe ./cmd/wirectl
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/e2e/test_talk_api.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/e2e/test_update.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
