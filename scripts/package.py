@@ -12,6 +12,8 @@ import sys
 import tarfile
 import zipfile
 
+from shell_tools import find_bash
+
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = ('darwin-arm64', 'linux-amd64', 'linux-arm64', 'windows-amd64')
 VERSION = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?\Z')
@@ -115,7 +117,7 @@ def bundle_full(stage, target, env):
         wintun_stage.mkdir(parents=True,exist_ok=True)
         # Resolve the destination in the same MSYS shell as the fetch script;
         # a Windows-native C:\ path would fail its POSIX repository guard.
-        run(['bash','-c','exec bash components/connect/scripts/fetch-wintun.sh "$(pwd -P)/components/connect/.cache/package-wintun"'],env)
+        run([find_bash(env),'-c','exec "$BASH" components/connect/scripts/fetch-wintun.sh "$(pwd -P)/components/connect/.cache/package-wintun"'],env)
         shutil.copy2(wintun_stage/'wintun.dll',stage/'bin/wintun.dll')
         shutil.copy2(wintun_stage/'WINTUN-LICENSE.txt',stage/'bin/WINTUN-LICENSE.txt')
         shutil.copy2(wintun_stage/'WINTUN-LICENSE.txt',stage/'licenses/WINTUN-LICENSE.txt')

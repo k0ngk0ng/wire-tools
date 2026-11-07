@@ -104,6 +104,23 @@ class DownloadAPI(unittest.TestCase):
             self.source.shutdown()
             self.source.server_close()
 
+    def test_tracker_and_login_maintenance_with_runtime_running(self):
+        tracker = 'http://127.0.0.1:12345/announce'
+        def cli(*args):
+            result=subprocess.run([str(BINARY),*args],env=self.env,cwd=ROOT,text=True,capture_output=True,timeout=45)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            return result.stdout
+        cli('download','bt','trackers','add',tracker)
+        self.assertIn(tracker,self.request('GET','/v1/download/trackers'))
+        cli('download','bt','trackers','remove',tracker)
+        self.assertNotIn(tracker,self.request('GET','/v1/download/trackers'))
+        session={'origin':'https://example.com','user_agent':'e2e','cookies':[{'name':'sid','value':'private-cookie','domain':'example.com','path':'/','secure':True}]}
+        saved=self.request('POST','/v1/download/auth/sessions',session)
+        self.assertTrue(saved['saved'])
+        cli('download','logout','https://example.com')
+        remaining=list((self.dir/'download/auth').glob('*.json'))
+        self.assertEqual(remaining,[])
+
     def test_pause_resume_and_remove(self):
         job = self.request('POST', '/v1/download/jobs', {'source': self.url})
         id = job['id']

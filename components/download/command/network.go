@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/k0ngk0ng/wire-tools/api"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,11 +47,18 @@ func btTrackersListCommand(dir string, args []string) error {
 	if fs.NArg() != 0 {
 		return errors.New("usage: wirectl download bt trackers list [--json]")
 	}
-	c, err := config.Load(dir)
-	if err != nil {
-		return err
+	var trackers []string
+	if os.Getenv("WIRECTL_API_CLIENT") == "1" {
+		if err := api.New(os.Getenv("WIRECTL_HOME")).Request(context.Background(), "GET", "/v1/download/trackers", nil, &trackers); err != nil {
+			return err
+		}
+	} else {
+		c, err := config.Load(dir)
+		if err != nil {
+			return err
+		}
+		trackers = c.Trackers
 	}
-	trackers := c.Trackers
 	if trackers == nil {
 		trackers = []string{}
 	}
@@ -74,6 +82,15 @@ func btTrackersEditCommand(dir, operation string, args []string) error {
 			return fmt.Errorf("invalid tracker %q: %w", raw, err)
 		}
 		trackers[i] = tracker
+	}
+	if os.Getenv("WIRECTL_API_CLIENT") == "1" {
+		if err := api.New(os.Getenv("WIRECTL_HOME")).Request(context.Background(), "POST", "/v1/download/trackers", map[string]any{"operation": operation, "trackers": trackers}, nil); err != nil {
+			return err
+		}
+		for _, tracker := range trackers {
+			fmt.Fprintln(os.Stdout, operation, tracker)
+		}
+		return nil
 	}
 	_, err := daemon.UpdateTrackers(dir, func(current []string) ([]string, error) {
 		updated := append([]string(nil), current...)
@@ -126,6 +143,20 @@ func containsString(values []string, want string) bool {
 func emuleCommand(ctx context.Context, dir string, args []string) error {
 	if len(args) != 2 || args[0] != "servers" || (args[1] != "update" && args[1] != "list") {
 		return errors.New("usage: wirectl download emule servers list|update")
+	}
+	if os.Getenv("WIRECTL_API_CLIENT") == "1" {
+		client := api.New(os.Getenv("WIRECTL_HOME"))
+		if args[1] == "update" {
+			return client.Request(ctx, "POST", "/v1/download/servers", map[string]any{}, nil)
+		}
+		var result struct {
+			Output string `json:"output"`
+		}
+		if err := client.Request(ctx, "GET", "/v1/download/servers", nil, &result); err != nil {
+			return err
+		}
+		_, err := os.Stdout.WriteString(result.Output)
+		return err
 	}
 	if args[1] == "update" {
 		return daemon.UpdateServers(ctx, dir)

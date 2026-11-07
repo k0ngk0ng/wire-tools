@@ -29,6 +29,9 @@ err := client.Request(ctx, "GET", "/v1/status", nil, &status)
 | `POST` | `/v1/download/jobs` | `{"source":"HTTP(S)/magnet/ED2K/absolute torrent path"}`，返回任务 |
 | `POST` | `/v1/download/submissions` | `{"source":"URL"}`，支持网站视频及批量结果 |
 | `POST` | `/v1/download/jobs/{id}/{action}` | `pause`、`resume` 或 `remove` |
+| `GET`、`PUT`、`POST` | `/v1/download/trackers` | 查询、替换或编辑 tracker；`PUT` 传 `trackers` 数组，`POST` 加 `operation: add/remove`，对运行中的 aria2 生效 |
+| `GET`、`POST` | `/v1/download/servers` | 查询运行中 aMule 的服务器；刷新传 HTTPS `urls` 数组，或传经过验证的 server.met base64 `data` |
+| `POST`、`DELETE` | `/v1/download/auth/sessions` | 保存登录会话或按 `?origin=` 删除；返回值不包含 cookie |
 | `POST` | `/v1/download/searches` | 创建搜索；详细字段见 Download 文档 |
 | `GET`、`DELETE` | `/v1/download/searches/{id}` | 查询或取消搜索 |
 | `GET` | `/v1/connect/connections` | 当前和保存的连接，不包含私钥或授权令牌 |

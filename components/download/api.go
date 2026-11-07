@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -36,17 +34,8 @@ func (m *Manager) ensure() (*daemon.Managed, error) {
 	if m.runtime != nil {
 		return m.runtime, nil
 	}
-	c, err := config.Load(m.dir)
-	if errors.Is(err, os.ErrNotExist) {
-		_, err = config.Init(m.dir, filepath.Join(m.dir, "downloads"))
-		if err == nil {
-			c, err = config.Load(m.dir)
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	m.runtime, err = daemon.OpenManaged(m.ctx, m.dir, c)
+	var err error
+	m.runtime, err = daemon.OpenManaged(m.ctx, m.dir)
 	return m.runtime, err
 }
 func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -55,6 +44,9 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(503)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	if runtime.Maintenance(w, r) {
 		return
 	}
 	if r.URL.Path == "/status" && r.Method == "GET" {

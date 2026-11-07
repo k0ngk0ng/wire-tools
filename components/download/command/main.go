@@ -6,6 +6,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/k0ngk0ng/wire-tools/api"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -133,6 +135,9 @@ func run(ctx context.Context, args []string) error {
 	app.Commands["logout"] = cli.Command{Summary: "Forget a website's saved download session", Run: func(ctx context.Context, args []string) error {
 		if len(args) != 1 {
 			return errors.New("usage: wirectl download logout <website>")
+		}
+		if os.Getenv("WIRECTL_API_CLIENT") == "1" {
+			return api.New(os.Getenv("WIRECTL_HOME")).Request(ctx, "DELETE", "/v1/download/auth/sessions?origin="+url.QueryEscape(args[0]), nil, nil)
 		}
 		return auth.Forget(*dir, args[0])
 	}}

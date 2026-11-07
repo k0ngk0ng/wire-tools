@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/k0ngk0ng/wire-tools/api"
 	"github.com/k0ngk0ng/wire-tools/components/download/internal/auth"
 )
 
@@ -50,7 +51,7 @@ func loginCommand(ctx context.Context, dir string, args []string) error {
 		if json.Unmarshal(b, &session) != nil {
 			return errors.New("invalid login session")
 		}
-		if err = auth.Save(dir, session); err != nil {
+		if err = saveSession(ctx, dir, session); err != nil {
 			return err
 		}
 		fmt.Println(auth.Describe(session))
@@ -84,9 +85,16 @@ func loginCommand(ctx context.Context, dir string, args []string) error {
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
 	}
-	if err = auth.Save(dir, session); err != nil {
+	if err = saveSession(ctx, dir, session); err != nil {
 		return err
 	}
 	fmt.Println(auth.Describe(session))
 	return nil
+}
+
+func saveSession(ctx context.Context, dir string, session auth.Session) error {
+	if os.Getenv("WIRECTL_API_CLIENT") == "1" {
+		return api.New(os.Getenv("WIRECTL_HOME")).Request(ctx, "POST", "/v1/download/auth/sessions", session, nil)
+	}
+	return auth.Save(dir, session)
 }

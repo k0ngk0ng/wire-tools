@@ -22,6 +22,9 @@ wirectl download search '关键词'
 | `POST` | `/v1/download/jobs` | 提交单个下载，JSON 字段为 `source` |
 | `POST` | `/v1/download/submissions` | 提交网站视频或批量结果 |
 | `POST` | `/v1/download/jobs/{id}/{action}` | `pause`、`resume`、`remove` |
+| `GET`、`PUT`、`POST` | `/v1/download/trackers` | 查询、替换或增删 tracker，并应用到运行中的 aria2 |
+| `GET`、`POST` | `/v1/download/servers` | 查询原生服务器列表，刷新 HTTPS 来源或导入经过验证的 server.met |
+| `POST`、`DELETE` | `/v1/download/auth/sessions` | 保存或删除按网站隔离的登录会话 |
 | `POST` | `/v1/download/searches` | 创建搜索 |
 | `GET` | `/v1/download/searches/{id}` | 查询搜索结果 |
 | `DELETE` | `/v1/download/searches/{id}` | 取消搜索 |
@@ -30,3 +33,5 @@ wirectl download search '关键词'
 API 的地址发现和认证方式见根目录文档。下载状态默认位于 `$WIRECTL_HOME/download`，内置 HTTP 后端在该目录保存任务日志，下载内容位于 `downloads/`。部分文件以私有文件暂存，完成时发布；不会覆盖同名现有文件。
 
 原插件版本的详细协议和操作说明保存在 [历史文档](docs/LEGACY.md)。其中独立安装、daemon 和发布步骤只适用于原仓库版本。
+
+与原插件共用状态目录时，运行时会先取得原 `daemon.lock`。如果旧进程仍占用目录，API 返回状态正在使用的错误，并保持已有配置和数据不变；可等待旧会话结束，或通过 `WIRECTL_HOME` 选择独立目录。

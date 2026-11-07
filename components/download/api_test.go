@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"github.com/k0ngk0ng/wire-tools/components/download/internal/auth"
+	"github.com/k0ngk0ng/wire-tools/components/download/internal/config"
+	"github.com/k0ngk0ng/wire-tools/components/download/internal/filelock"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -161,5 +163,67 @@ func TestAuthenticatedHTTPKeepsOriginalSource(t *testing.T) {
 	}
 	if !bytes.Contains(journal, []byte(source.URL+"/private.bin")) || bytes.Contains(journal, []byte("private-cookie")) || bytes.Contains(journal, []byte("/fetch/")) {
 		t.Fatal("HTTP journal did not retain a safe original source")
+	}
+}
+
+func TestLegacyStateLockExcludesManagedRuntimeWithoutMutation(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := config.Init(dir, filepath.Join(dir, "downloads")); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, "daemon.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err = filelock.Try(lock); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(context.Background(), dir, "test")
+	defer m.Close()
+	rec := httptest.NewRecorder()
+	m.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/status", nil))
+	if rec.Code != 503 {
+		t.Fatalf("legacy ownership not respected: %d %s", rec.Code, rec.Body.String())
+	}
+	after, _ := os.ReadFile(filepath.Join(dir, "config.json"))
+	if !bytes.Equal(before, after) {
+		t.Fatal("legacy configuration modified")
+	}
+	afterEntries, _ := os.ReadDir(dir)
+	if len(afterEntries) != len(entries) {
+		t.Fatal("legacy state gained runtime files while locked")
+	}
+}
+
+func TestManagedRuntimeHoldsLegacyLockUntilClose(t *testing.T) {
+	dir := t.TempDir()
+	m := New(context.Background(), dir, "test")
+	rec := httptest.NewRecorder()
+	m.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/status", nil))
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, "daemon.lock"), os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err = filelock.Try(lock); !filelock.Busy(err) {
+		t.Fatalf("managed runtime did not hold state lock: %v", err)
+	}
+	if err = m.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = filelock.Try(lock); err != nil {
+		t.Fatalf("managed close did not release state: %v", err)
 	}
 }

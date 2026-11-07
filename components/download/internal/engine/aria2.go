@@ -490,3 +490,28 @@ func (a *Aria2) Close() error {
 }
 
 func (a *Aria2) SaveSession(ctx context.Context) error { return a.Call(ctx, "saveSession", nil, nil) }
+
+// UpdateTrackers changes the default list and the options of running tasks.
+func (a *Aria2) UpdateTrackers(ctx context.Context, trackers []string) error {
+	options := map[string]string{"bt-tracker": strings.Join(trackers, ",")}
+	if err := a.Call(ctx, "changeGlobalOption", []any{options}, nil); err != nil {
+		return err
+	}
+	items, err := a.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.Status == "complete" || item.Status == "removed" || item.Status == "error" {
+			continue
+		}
+		if err = a.Call(ctx, "changeOption", []any{item.ID, options}, nil); err != nil {
+			var rpc *aria2RPCError
+			if errors.As(err, &rpc) && rpc.code == 1 {
+				continue
+			}
+			return err
+		}
+	}
+	return nil
+}

@@ -4,7 +4,7 @@
 
 ## 本地验证
 
-需要 Go（版本见 `go.mod`）、C 编译器和 Python 3。所有构建缓存、测试目录和结果留在当前仓库。
+需要 Go（版本见 `go.mod`）、C 编译器和 Python 3。所有构建缓存、测试目录和结果留在当前仓库。Windows 开发与打包还需要 Git for Windows；脚本从其安装目录选择 Bash，不依赖 WSL。
 
 ```sh
 make check

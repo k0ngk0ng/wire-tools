@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/k0ngk0ng/wire-tools/components/download/internal/config"
 	"github.com/k0ngk0ng/wire-tools/components/download/internal/engine"
+	"github.com/k0ngk0ng/wire-tools/components/download/internal/filelock"
 	"github.com/k0ngk0ng/wire-tools/components/download/internal/search"
 	"github.com/k0ngk0ng/wire-tools/components/download/internal/video"
 )
@@ -20,18 +23,51 @@ import (
 // Managed embeds downloads in the unified local API. Expensive native engines
 // are opened only when their protocol is requested or has unfinished tasks.
 type Managed struct {
-	Handler    http.Handler
-	Store      *Store
-	cancel     context.CancelFunc
-	done       chan struct{}
-	closeOnce  sync.Once
-	closeErr   error
-	backends   []engine.Backend
-	searches   *SearchService
-	closeProxy func()
+	Handler       http.Handler
+	Store         *Store
+	cancel        context.CancelFunc
+	done          chan struct{}
+	closeOnce     sync.Once
+	closeErr      error
+	backends      []engine.Backend
+	searches      *SearchService
+	closeProxy    func()
+	stateLock     *os.File
+	dir           string
+	maintenanceMu sync.Mutex
+	aria, amule   *lazyBackend
 }
 
-func OpenManaged(ctx context.Context, dir string, c config.Config) (*Managed, error) {
+func OpenManaged(ctx context.Context, dir string) (result *Managed, err error) {
+	if err = os.MkdirAll(dir, 0700); err != nil {
+		return nil, err
+	}
+	stateLock, err := acquire(dir)
+	if err != nil {
+		return nil, fmt.Errorf("download state is in use by another runtime or legacy wire-download process; finish the old session or choose a different WIRECTL_HOME: %w", err)
+	}
+	defer func() {
+		if result == nil {
+			stateLock.Close()
+		}
+	}()
+	// A crashed API releases daemon.lock immediately; its watchdog may still be
+	// flushing a native core. Wait for those owners before rewriting configs.
+	previous, err := waitPreviousEngines(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	defer previous()
+	c, err := config.Load(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		_, err = config.Init(dir, filepath.Join(dir, "downloads"))
+		if err == nil {
+			c, err = config.Load(dir)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
 	// Allocate engine/control ports for this runtime without rewriting the saved
 	// user configuration. Separate state directories may run concurrently.
 	for _, port := range []*int{&c.Aria2Port, &c.AMulePort} {
@@ -47,7 +83,7 @@ func OpenManaged(ctx context.Context, dir string, c config.Config) (*Managed, er
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	m := &Managed{cancel: cancel, done: make(chan struct{})}
+	m := &Managed{cancel: cancel, done: make(chan struct{}), stateLock: stateLock, dir: dir}
 	builtin, err := engine.NewHTTP(ctx, c.Downloads, dir)
 	if err != nil {
 		cancel()
@@ -106,6 +142,8 @@ func OpenManaged(ctx context.Context, dir string, c config.Config) (*Managed, er
 	aria.ctx = ctx
 	amule.ctx = ctx
 	vb := video.New(video.Options{Binary: c.YTDLPBinary, FFmpeg: c.FFmpegBinary, Deno: c.DenoBinary, StateDir: dir, Downloads: c.Downloads, Max: c.MaxDownloads, Limit: c.DownloadLimit})
+	m.aria = aria
+	m.amule = amule
 	m.backends = []engine.Backend{builtin, aria, amule, vb}
 	store, err := NewStore(dir, map[string]engine.Backend{"http": builtin, "aria2": aria, "amule": amule, "yt-dlp": vb})
 	if err != nil {
@@ -141,7 +179,20 @@ func OpenManaged(ctx context.Context, dir string, c config.Config) (*Managed, er
 		if err != nil {
 			return err
 		}
-		return b.(*engine.AMule).Search(ctx, req, emit)
+		// EC becomes ready before aMule has logged into its selected network.
+		// Keep the initial API request pending during that transition rather than
+		// requiring a second manual search after automatic startup.
+		for {
+			err := b.(*engine.AMule).Search(ctx, req, emit)
+			if err == nil || !strings.Contains(err.Error(), "not connected") {
+				return err
+			}
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("waiting for aMule network connection: %w", ctx.Err())
+			case <-time.After(250 * time.Millisecond):
+			}
+		}
 	})
 	if err != nil {
 		cancel()
@@ -193,6 +244,9 @@ func (m *Managed) Close() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		_ = m.Store.Refresh(ctx)
+		if err := m.stateLock.Close(); err != nil && m.closeErr == nil {
+			m.closeErr = err
+		}
 	})
 	return m.closeErr
 }
@@ -303,4 +357,47 @@ func (l *lazyBackend) Close() error {
 		l.cleanup()
 	}
 	return err
+}
+
+func waitPreviousEngines(ctx context.Context, dir string) (func(), error) {
+	var held []*os.File
+	release := func() {
+		for _, f := range held {
+			f.Close()
+		}
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for _, name := range []string{"aria2.log.owner.lock", "amuled.log.owner.lock"} {
+		path := filepath.Join(dir, "logs", name)
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			release()
+			return nil, err
+		}
+		held = append(held, f)
+		for {
+			err = filelock.Try(f)
+			if err == nil {
+				break
+			}
+			if !filelock.Busy(err) {
+				release()
+				return nil, err
+			}
+			if time.Now().After(deadline) {
+				release()
+				return nil, errors.New("previous native engine is still finishing its state flush")
+			}
+			select {
+			case <-ctx.Done():
+				release()
+				return nil, ctx.Err()
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+	}
+	return release, nil
 }

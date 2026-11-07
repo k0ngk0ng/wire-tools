@@ -34,7 +34,7 @@ func (s *Store) Submit(ctx context.Context, source string) (Submission, error) {
 	}
 	backend, ok := s.backends["yt-dlp"].(*video.Backend)
 	if !ok {
-		return Submission{}, errors.New("video engine unavailable; update and restart the daemon")
+		return Submission{}, errors.New("video engine unavailable; run wirectl update")
 	}
 	// Network resolution must not hold the store lock: list/pause/remove continue
 	// to work while the website is responding.

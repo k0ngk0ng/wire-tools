@@ -20,6 +20,7 @@ import time
 import unittest
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
@@ -75,8 +76,11 @@ class Profile:
         req = Request('http://' + self.ep['address'] + '/v1/download' + path,
                       data=None if body is None else json.dumps(body).encode(), method=method,
                       headers={'Authorization': 'Bearer ' + self.ep['token'], 'Content-Type': 'application/json'})
-        with urlopen(req, timeout=90) as r:
-            return json.load(r)
+        try:
+            with urlopen(req, timeout=90) as r:
+                return json.load(r)
+        except HTTPError as error:
+            raise AssertionError(f'{method} {path}: HTTP {error.code}: {error.read().decode()}') from error
 
     def wait(self, check, label, timeout=90):
         deadline = time.monotonic() + timeout
@@ -159,6 +163,12 @@ class NativeDownload(unittest.TestCase):
             result = p.wait(finished, 'torrent peer transfer', 90)
             self.assertEqual(hashlib.sha256((p.dir / 'download/downloads' / filename).read_bytes()).hexdigest(), hashlib.sha256(payload).hexdigest())
             self.assertTrue(tracker.requests)
+            extra_tracker=tracker.url+'?updated=1'
+            p.request('POST','/trackers',{'operation':'add','trackers':[extra_tracker]})
+            self.assertIn(extra_tracker,p.request('GET','/trackers'))
+            self.assertIn(extra_tracker,p.cli('download','bt','trackers','list','--json'))
+            p.cli('download','bt','trackers','remove',extra_tracker)
+            self.assertNotIn(extra_tracker,p.request('GET','/trackers'))
             p.request('POST', f"/jobs/{job['id']}/remove", {})
             self.assertEqual(p.request('GET', '/status')['jobs'][0]['status'], 'removed')
         finally:
@@ -192,6 +202,11 @@ class NativeDownload(unittest.TestCase):
             digest = seed.wait(shared_hash, 'seed hashes and shares file', 30)
             leecher.start_amule()
             leecher.wait(lambda: len(server.client_ids) >= 2, 'both native cores logged into local server', 30)
+            self.assertIn(address,leecher.request('GET','/servers')['output'])
+            self.assertIn(address,leecher.cli('download','emule','servers','list'))
+            metadata=(leecher.dir/'download/amule/server.met').read_bytes()
+            leecher.request('POST','/servers',{'data':base64.b64encode(metadata).decode()})
+
             server.configure_search(bytes.fromhex(digest), filename, len(payload), address, seed.config['ed2k_port'])
             job = leecher.request('POST', '/jobs', {'source': f'ed2k://|file|{filename}|{len(payload)}|{digest}|/'})
             self.assertEqual(job['engine'], 'amule')
