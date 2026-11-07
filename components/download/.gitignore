@@ -1,0 +1,5 @@
+/.cache/
+/bin/
+/.test-data/
+/dist/
+__pycache__/

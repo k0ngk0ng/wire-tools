@@ -1,0 +1,100 @@
+name: Sync talk releases
+on:
+  schedule:
+    - cron: '43 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: talk-package-sync
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      changed: ${{ steps.sync.outputs.changed }}
+      base: ${{ steps.sync.outputs.base }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: sync
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_VERIFY: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          python3 scripts/sync-talk.py scoop
+          if [ "$FORCE_VERIFY" != true ] && git ls-files --error-unmatch bucket/wire-talk.json >/dev/null 2>&1 && git diff --quiet -- bucket/wire-talk.json bucket/talk.json; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: steps.sync.outputs.changed == 'true'
+        with:
+          name: talk-manifest
+          path: |
+            bucket/wire-talk.json
+            bucket/talk.json
+  validate:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: windows-latest
+    env:
+      SCOOP: ${{ github.workspace }}/.cache/scoop
+      WIRE_TALK_HOME: ${{ github.workspace }}/.cache/state
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: talk-manifest
+          path: .cache/talk
+      - shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:SCOOP = [IO.Path]::GetFullPath($env:SCOOP)
+          Invoke-WebRequest https://get.scoop.sh -OutFile .cache/install-scoop.ps1
+          & .cache/install-scoop.ps1 -RunAsAdmin -ScoopDir $env:SCOOP
+          $env:PATH = "$env:SCOOP/shims;" + $env:PATH
+          scoop bucket add k0ngk0ng https://github.com/k0ngk0ng/scoop-bucket
+          Copy-Item .cache/talk/wire-talk.json "$env:SCOOP/buckets/k0ngk0ng/bucket/wire-talk.json"
+          Copy-Item .cache/talk/talk.json "$env:SCOOP/buckets/k0ngk0ng/bucket/talk.json"
+          scoop install k0ngk0ng/wire-talk
+          $expected = (Get-Content .cache/talk/wire-talk.json | ConvertFrom-Json).version
+          if ((& wirectl talk version).Trim() -ne $expected) { throw 'plugin dispatch/version failed' }
+          scoop install k0ngk0ng/talk
+          if ($LASTEXITCODE -ne 0) { throw 'compatibility package failed' }
+          scoop uninstall talk
+          if ($LASTEXITCODE -ne 0 -or (& wirectl talk version).Trim() -ne $expected) { throw 'compatibility package removed canonical executable' }
+          wirectl talk init
+          if ($LASTEXITCODE -ne 0) { throw 'init failed' }
+          $output = & wirectl talk update 2>&1 | Out-String
+          $updateExit = $LASTEXITCODE
+          Write-Host "Update exit: $updateExit; output: $output"
+          if ($updateExit -eq 0 -or $output -notmatch 'scoop update') { throw 'package marker failed' }
+          exit 0 # Do not propagate the expected updater rejection as a job failure.
+  publish:
+    needs: [prepare, validate]
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Reject stale update
+        env:
+          EXPECTED_BASE: ${{ needs.prepare.outputs.base }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_BASE"
+      - uses: actions/download-artifact@v4
+        with:
+          name: talk-manifest
+          path: bucket
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bucket/wire-talk.json bucket/talk.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Update verified talk release'
+            git push origin HEAD:main
+          fi

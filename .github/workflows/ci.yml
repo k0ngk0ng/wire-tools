@@ -1,0 +1,51 @@
+name: CI
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: false
+        default: ""
+permissions:
+  contents: read
+jobs:
+  native:
+    name: native-${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            os: ubuntu-24.04
+          - target: linux-arm64
+            os: ubuntu-24.04-arm
+          - target: darwin-arm64
+            os: macos-15
+          - target: windows-amd64
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Native tests, vet and CLI/API E2E
+        shell: bash
+        run: python3 scripts/check.py
+      - name: Retain repeatable verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checks-${{ matrix.target }}
+          path: .cache/evidence/
+          if-no-files-found: error
+          retention-days: 14

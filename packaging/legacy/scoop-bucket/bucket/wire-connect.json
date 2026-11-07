@@ -1,0 +1,39 @@
+{
+    "version": "1.4.2",
+    "description": "Encrypted point-to-point networking with UDP hole punching and HTTPS relay fallback",
+    "homepage": "https://github.com/k0ngk0ng/wire-connect",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/k0ngk0ng/wire-connect/releases/download/v1.4.2/wire-connect-1.4.2-windows-amd64.zip",
+            "hash": "49a4874215e5e316479e8701af8f4bf6b0390b55961b4476621dd0695df8a2cd"
+        }
+    },
+    "depends": [
+        "k0ngk0ng/wirectl"
+    ],
+    "bin": "bin/wirectl-connect.exe",
+    "post_install": [
+        "$binary = Join-Path $dir 'bin\\wirectl-connect.exe'",
+        "if (!(Test-Path -LiteralPath $binary -PathType Leaf)) { throw 'wirectl-connect.exe was not installed' }",
+        "$marker = Join-Path (Split-Path -Parent $binary) '.wire-connect-package-manager'",
+        "[IO.File]::WriteAllText($marker, 'scoop', [Text.UTF8Encoding]::new($false))"
+    ],
+    "notes": [
+        "Run 'wirectl connect setup' as your regular user to authorize the network helper.",
+        "After 'scoop update wirectl wire-connect', run setup to refresh the helper and resume for each connection you want active."
+    ],
+    "checkver": {
+        "github": "https://github.com/k0ngk0ng/wire-connect"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/k0ngk0ng/wire-connect/releases/download/v$version/wire-connect-$version-windows-amd64.zip"
+            }
+        },
+        "hash": {
+            "url": "$baseurl/SHA256SUMS"
+        }
+    },
+    "license": "MIT"
+}

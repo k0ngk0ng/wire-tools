@@ -1,0 +1,25 @@
+{
+    "version": "0.2.3",
+    "description": "Small command host for independently released CLI plugins",
+    "homepage": "https://github.com/k0ngk0ng/wirectl",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/k0ngk0ng/wirectl/releases/download/v0.2.3/wirectl-0.2.3-windows-amd64.zip",
+            "hash": "81ae0f986f523d1f618d77e7dd7d374aa0e614b7fc6c5e74eb9b88f78e32dc86"
+        }
+    },
+    "bin": "bin/wirectl.exe",
+    "checkver": {
+        "github": "https://github.com/k0ngk0ng/wirectl"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/k0ngk0ng/wirectl/releases/download/v$version/wirectl-$version-windows-amd64.zip"
+            }
+        },
+        "hash": {
+            "url": "$baseurl/SHA256SUMS"
+        }
+    }
+}

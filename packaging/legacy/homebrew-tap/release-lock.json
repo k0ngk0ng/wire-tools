@@ -1,0 +1,57 @@
+{
+  "wire-connect": {
+    "assets": {
+      "darwin-arm64": {
+        "sha256": "c6e2d0b8c53274c976867cc19d1f7ba9f4cdf9c0e1f3c8fbcd7f3451c312e840",
+        "url": "https://github.com/k0ngk0ng/wire-connect/releases/download/v1.4.2/wire-connect-1.4.2-darwin-arm64.tar.gz"
+      },
+      "linux-amd64": {
+        "sha256": "fde8bad9e586831a225cbc8ca30867e89d23f1bfe47d73aabc6a2bc47b905da9",
+        "url": "https://github.com/k0ngk0ng/wire-connect/releases/download/v1.4.2/wire-connect-1.4.2-linux-amd64.tar.gz"
+      },
+      "linux-arm64": {
+        "sha256": "d71a16bbd2859bff12e57c2a5df8bab62dcb290f6b4c292c0877c739b4221033",
+        "url": "https://github.com/k0ngk0ng/wire-connect/releases/download/v1.4.2/wire-connect-1.4.2-linux-arm64.tar.gz"
+      }
+    },
+    "version": "1.4.2"
+  },
+  "wire-download": {
+    "assets": {
+      "darwin-arm64": {
+        "sha256": "3081eea1ab73e2490c41065cf93f8b49f2bb415e9463baaa0e660a99104b2f75",
+        "url": "https://github.com/k0ngk0ng/wire-download/releases/download/v0.3.2/wire-download-0.3.2-darwin-arm64.tar.gz"
+      },
+      "linux-amd64": {
+        "sha256": "51694491f156b41a53331e5357429f0a2729272a488ba1634a7d598aa9f41272",
+        "url": "https://github.com/k0ngk0ng/wire-download/releases/download/v0.3.2/wire-download-0.3.2-linux-amd64.tar.gz"
+      },
+      "linux-arm64": {
+        "sha256": "4dc5a74d7afed2342f99e1136c4a68da0411f89599d53de6ea42af7abd60d3f6",
+        "url": "https://github.com/k0ngk0ng/wire-download/releases/download/v0.3.2/wire-download-0.3.2-linux-arm64.tar.gz"
+      }
+    },
+    "version": "0.3.2"
+  },
+  "wirectl": {
+    "assets": {
+      "darwin-amd64": {
+        "sha256": "b99835b78710c08a41d566f9f65c0d8616aecbc043fe83c2bb39f40995ad0557",
+        "url": "https://github.com/k0ngk0ng/wirectl/releases/download/v0.2.3/wirectl-0.2.3-darwin-amd64.tar.gz"
+      },
+      "darwin-arm64": {
+        "sha256": "c51c03cafbef54d8191b630542a1312184dd908126d998b8e863192fff822b99",
+        "url": "https://github.com/k0ngk0ng/wirectl/releases/download/v0.2.3/wirectl-0.2.3-darwin-arm64.tar.gz"
+      },
+      "linux-amd64": {
+        "sha256": "d80fe8036a13f2b861ccf15b9a9796a635f2f48e5482d411cecab4d4ed9170cb",
+        "url": "https://github.com/k0ngk0ng/wirectl/releases/download/v0.2.3/wirectl-0.2.3-linux-amd64.tar.gz"
+      },
+      "linux-arm64": {
+        "sha256": "b547fe0692b16d1a509d8c8b834b76653f913abc58d6ea51ea77413f0e7490d8",
+        "url": "https://github.com/k0ngk0ng/wirectl/releases/download/v0.2.3/wirectl-0.2.3-linux-arm64.tar.gz"
+      }
+    },
+    "version": "0.2.3"
+  }
+}

@@ -1,0 +1,23 @@
+[
+  {
+    "repository": "https://github.com/k0ngk0ng/wirectl",
+    "commit": "2f834f4566c2b55441330611f8ae965e2b4f9e14",
+    "destination": "cli, cmd/wirectl",
+    "role": "original CLI host, replaced by unified API frontend"
+  },
+  {
+    "repository": "https://github.com/k0ngk0ng/wire-connect",
+    "commit": "4d45a49fdbfdd0c57113ab4e2a4fa784a5459d51",
+    "destination": "components/connect"
+  },
+  {
+    "repository": "https://github.com/k0ngk0ng/wire-download",
+    "commit": "40561b30077f311f0223fc3bcea64c41116642cd",
+    "destination": "components/download"
+  },
+  {
+    "repository": "https://github.com/k0ngk0ng/wire-talk",
+    "commit": "e254c58f916ecf40712a414f179bb8f330888243",
+    "destination": "components/talk"
+  }
+]

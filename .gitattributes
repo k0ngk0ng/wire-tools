@@ -1,0 +1,2 @@
+# Patch context whitespace belongs to the pinned upstream source.
+*.patch -whitespace

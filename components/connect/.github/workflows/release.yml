@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  verify:
+    name: Verify release commit
+    uses: ./.github/workflows/ci.yml
+    with:
+      version: ${{ github.ref_name }}
+    permissions:
+      contents: read
+
+  publish:
+    name: Publish release
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GOCACHE: ${{ github.workspace }}/.cache/go-build
+      GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
+      GOTMPDIR: ${{ github.workspace }}/.cache/tmp
+      TMPDIR: ${{ github.workspace }}/.cache/tmp
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Confirm the checked out commit
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Download verified build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: wire-connect-${{ github.sha }}
+          path: dist
+      - name: Verify release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s dist/SHA256SUMS
+          (cd dist && sha256sum -c SHA256SUMS)
+      - name: Attest release artifacts
+        id: attest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+      - name: Verify release provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+          SIGNER_WORKFLOW: ${{ github.repository }}/.github/workflows/release.yml
+          SOURCE_DIGEST: ${{ github.sha }}
+          GH_CONFIG_DIR: ${{ github.workspace }}/.cache/gh
+          XDG_CACHE_HOME: ${{ github.workspace }}/.cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GH_CONFIG_DIR" "$XDG_CACHE_HOME"
+          test -s "$BUNDLE_PATH"
+          mapfile -d '' assets < <(find dist -maxdepth 1 -type f -print0 | sort -z)
+          if ((${#assets[@]} == 0)); then
+            echo 'no release assets were produced' >&2
+            exit 1
+          fi
+          for asset in "${assets[@]}"; do
+            gh attestation verify "$asset" \
+              --bundle "$BUNDLE_PATH" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$SIGNER_WORKFLOW" \
+              --source-digest "$SOURCE_DIGEST" \
+              --deny-self-hosted-runners
+          done
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/.cache/tmp"
+          notes_file="$(mktemp "$GITHUB_WORKSPACE/.cache/tmp/wire-connect-release-notes.XXXXXX")"
+          cleanup() { rm -f "$notes_file"; }
+          trap cleanup EXIT
+          cat > "$notes_file" <<EOF
+          wire-connect $TAG
+
+          Connection status now separates peer session readiness from transport
+          path. Saved profiles show connected, not connected, unconfirmed, stopped
+          or unavailable states, and recent status snapshots plus WireGuard
+          handshakes determine the connected counts while Direct and Relay remain
+          separate paths.
+
+          Fix stop and delete timing out during native service cleanup. IPC stop,
+          service-manager cleanup and final shutdown confirmation now have separate
+          time budgets. Timeout errors include a retry command, saved pairs remain
+          protected when cleanup is incomplete, and cancellation or deadline causes
+          remain visible to callers.
+
+          Pair two devices with a short code and access the peer through its
+          WireGuard virtual IP. ICE/STUN prefers UDP direct connectivity;
+          authenticated HTTPS/DERP relay is used when direct access fails.
+          Native background services support saved connections and restart.
+
+          Client archives: Linux amd64/arm64, macOS arm64, Windows amd64.
+          The public server runs on Linux. Windows includes official x64 Wintun.
+          Install beside wirectl to use its connect command, or run the
+          wirectl-connect executable directly with the same arguments.
+
+          Setup and validation boundaries:
+          https://github.com/$GITHUB_REPOSITORY/blob/$TAG/README.md
+
+          This release was built by the verified CI workflow for the tagged commit.
+          SHA256SUMS is included with all archives and THIRD_PARTY_INVENTORY.txt.
+          GitHub artifact attestations are attached to the release subjects.
+
+          Verify provenance with:
+            gh attestation verify <asset> --repo $GITHUB_REPOSITORY
+
+          Apple and Windows code signing are not configured for this project; the
+          release does not claim platform code signatures.
+          EOF
+          gh release create "$TAG" dist/* --verify-tag --title "$TAG" --notes-file "$notes_file"

@@ -1,0 +1,78 @@
+name: Sync official releases
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      verify_current:
+        description: Reinstall and verify current packages even when versions are unchanged
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: package-sync
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      changed: ${{ steps.sync.outputs.changed }}
+      base: ${{ steps.sync.outputs.base }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check GitHub asset digests and independent SHA256SUMS
+        id: sync
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFY_CURRENT: ${{ inputs.verify_current }}
+        run: |
+          set -euo pipefail
+          echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          python3 scripts/sync.py
+          if git diff --quiet -- Formula release-lock.json && [[ "$VERIFY_CURRENT" != true ]]; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: steps.sync.outputs.changed == 'true'
+        with:
+          name: package-update
+          path: |
+            Formula/*.rb
+            release-lock.json
+  validate:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    uses: ./.github/workflows/ci.yml
+    with:
+      artifact: package-update
+  publish:
+    needs: [prepare, validate]
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Reject a stale update
+        env:
+          EXPECTED_BASE: ${{ needs.prepare.outputs.base }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_BASE"
+      - uses: actions/download-artifact@v4
+        with:
+          name: package-update
+      - name: Publish only after all native package installations pass
+        run: |
+          set -euo pipefail
+          python3 scripts/sync.py --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Formula release-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Update verified package releases'
+            git push origin HEAD:main
+          fi

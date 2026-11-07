@@ -1,0 +1,40 @@
+name: Install packages
+on:
+  push:
+  pull_request:
+  workflow_call:
+    inputs:
+      artifact:
+        type: string
+        default: ''
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      SCOOP: ${{ github.workspace }}/.cache/scoop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        if: inputs.artifact != ''
+        with:
+          name: ${{ inputs.artifact }}
+          path: bucket
+      - name: Verify release validation logic
+        run: python -m unittest discover -s scripts -p 'test_*.py' -v
+      - name: Install Scoop in the disposable runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Scoop embeds its root in Windows junction targets; use native separators.
+          $env:SCOOP = [IO.Path]::GetFullPath($env:SCOOP)
+          "SCOOP=$env:SCOOP" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          New-Item -ItemType Directory -Path "$env:GITHUB_WORKSPACE/.cache" -Force | Out-Null
+          Invoke-WebRequest https://get.scoop.sh -OutFile "$env:GITHUB_WORKSPACE/.cache/install-scoop.ps1"
+          # Hosted Windows runners are administrators; end users install normally.
+          & "$env:GITHUB_WORKSPACE/.cache/install-scoop.ps1" -RunAsAdmin -ScoopDir $env:SCOOP
+          "$env:SCOOP/shims" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Install dependency, exercise plugin dispatch, and update the package
+        shell: pwsh
+        run: ./scripts/test-install.ps1

@@ -1,0 +1,291 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable version tag, for example v1.0.0
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - id: version
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os,re
+          tag=os.environ['TAG']
+          if not re.fullmatch(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)',tag):
+              raise SystemExit('release requires stable SemVer vMAJOR.MINOR.PATCH')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:
+              output.write('tag='+tag+'\nversion='+tag[1:]+'\n')
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.version.outputs.tag }}
+      - id: source
+        shell: bash
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then test "$(git rev-parse HEAD)" = "$GITHUB_SHA"; fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  verify:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.version.outputs.sha }}
+  build:
+    needs: [version, verify]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            runner: ubuntu-24.04
+            container: debian:bookworm
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            container: debian:bookworm
+          - target: darwin-arm64
+            runner: macos-15
+          - target: windows-amd64
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container || '' }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GOTELEMETRY: off
+      JOBS: '4'
+    steps:
+      - name: Linux native build prerequisites and source repositories
+        if: startsWith(matrix.target, 'linux')
+        run: |
+          sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential git curl ca-certificates tar unzip zip python3 autoconf automake libtool pkg-config patch xz-utils bzip2 libssl-dev zlib1g-dev patchelf
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@v5
+        if: ${{ !startsWith(matrix.target, 'linux') }}
+        with:
+          python-version: '3.12'
+      - name: macOS build prerequisites
+        if: matrix.target == 'darwin-arm64'
+        run: brew install autoconf automake libtool pkg-config
+      - name: Build one complete native package
+        run: python3 scripts/package.py --version "$VERSION" --full
+      - name: Install and verify the actual release archive
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          extension=tar.gz
+          if [[ "$TARGET" == windows-* ]]; then extension=zip; fi
+          python3 scripts/test-installed.py "dist/wirectl-$VERSION-$TARGET.$extension"
+      - name: Verify installed Unix package with real download engines
+        if: ${{ !startsWith(matrix.target, 'windows') }}
+        env:
+          TARGET: ${{ matrix.target }}
+          WIRECTL_TEST_REPORT: download-native-process-e2e.json
+          WIRECTL_TEST_CRASH_BYTES: '1572864'
+          WIRECTL_TEST_SOURCE_DELAY: '.01'
+        run: |
+          set -euo pipefail
+          archive="dist/wirectl-$VERSION-$TARGET.tar.gz"
+          installation="$(python3 - "$archive" <<'PY'
+          from pathlib import Path
+          import sys
+          archive=Path(sys.argv[1])
+          print((Path('.cache/installed-package-e2e')/archive.stem/'installation').resolve())
+          PY
+          )"
+          export WIRECTL_BUNDLE_DIR="$installation"
+          export WIRECTL_TEST_BINARY="$installation/bin/wirectl"
+          test -x "$WIRECTL_TEST_BINARY"
+          for engine in aria2c amuled amulecmd; do
+            test -x "$installation/libexec/wirectl-download/bin/$engine"
+          done
+          mkdir -p .cache/evidence
+          python3 tests/e2e/test_download_api.py 2>&1 | tee .cache/evidence/download-native-api.log
+          python3 tests/e2e/test_download_native.py 2>&1 | tee .cache/evidence/download-native-protocol.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            dist/wirectl-${{ env.VERSION }}-${{ matrix.target }}.*
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: matrix.target == 'linux-amd64'
+        with:
+          name: release-sources
+          path: dist/wirectl-${{ env.VERSION }}-sources.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: package-checks-${{ matrix.target }}
+          path: |
+            .cache/evidence/
+            components/download/.cache/amule-build/logs/
+            components/download/.cache/video/ffmpeg-build.log
+          retention-days: 14
+  prepare:
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - name: Verify complete asset set and generate both package definitions
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,os,pathlib
+          root=pathlib.Path('dist'); version=os.environ['VERSION']
+          names=[f'wirectl-{version}-{target}{ext}' for target,ext in [('darwin-arm64','.tar.gz'),('linux-amd64','.tar.gz'),('linux-arm64','.tar.gz'),('windows-amd64','.zip'),('sources','.tar.gz')]]
+          assert sorted(p.name for p in root.iterdir())==sorted(names),'incomplete or unexpected assets'
+          (root/'SHA256SUMS').write_text(''.join(hashlib.sha256((root/name).read_bytes()).hexdigest()+'  '+name+'\n' for name in sorted(names)))
+          PY
+          python3 scripts/manifests.py --version "$VERSION"
+          cp packaging/generated/wirectl.rb packaging/generated/wirectl.json dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-release
+          path: dist/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-definitions
+          path: |
+            packaging/generated/Formula/wirectl.rb
+            packaging/generated/bucket/wirectl.json
+          if-no-files-found: error
+  package-managers:
+    needs: [version, prepare]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-release
+          path: .cache/release
+      - uses: Homebrew/actions/setup-homebrew@082c94ee19e776205cfa8e43802917d1425e2fe7
+        if: runner.os != 'Windows'
+        with:
+          stable: true
+      - name: Verify Homebrew installation and replacement
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          ruby -c .cache/release/wirectl.rb
+          bash scripts/test-homebrew.sh
+      - name: Verify Scoop manifest and actual Windows installation
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $manifest = Get-Content .cache/release/wirectl.json -Raw | ConvertFrom-Json
+          if ($manifest.version -ne $env:VERSION) { throw 'manifest version mismatch' }
+          $archive = ".cache/release/wirectl-$env:VERSION-windows-amd64.zip"
+          $digest = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -ne $manifest.architecture.'64bit'.hash) { throw 'Scoop digest mismatch' }
+          ./scripts/test-scoop.ps1
+  publish:
+    needs: [version, prepare, package-managers]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-release
+          path: dist
+      - name: Verify archive checksums
+        run: cd dist && sha256sum -c SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+      - name: Publish one release for every capability
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" dist/* --verify-tag --draft --title "wirectl $TAG" --generate-notes
+          gh release edit "$TAG" --draft=false
+  catalogs:
+    needs: [version, publish]
+    concurrency:
+      group: unified-package-catalogs
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: package-definitions
+          path: packaging/promote
+      - name: Promote both definitions inside this repository
+        run: |
+          mkdir -p Formula bucket
+          python3 - <<'PY'
+          import json,pathlib
+          old=pathlib.Path('bucket/wirectl.json')
+          new=json.loads(pathlib.Path('packaging/promote/bucket/wirectl.json').read_text())['version']
+          if old.exists():
+              current=json.loads(old.read_text())['version']
+              if tuple(map(int,new.split('.'))) < tuple(map(int,current.split('.'))):
+                  raise SystemExit('refusing to downgrade the published package catalog')
+          PY
+          cp packaging/promote/Formula/wirectl.rb Formula/wirectl.rb
+          cp packaging/promote/bucket/wirectl.json bucket/wirectl.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Formula/wirectl.rb bucket/wirectl.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Update unified wirectl package definitions'
+            git push
+          fi

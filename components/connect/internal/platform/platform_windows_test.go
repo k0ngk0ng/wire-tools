@@ -1,0 +1,159 @@
+//go:build windows && amd64
+
+package platform
+
+import (
+	"context"
+	"errors"
+	"golang.zx2c4.com/wintun"
+	"net"
+	"net/netip"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"golang.org/x/sys/windows"
+)
+
+func TestWindowsIPv4ReadinessRetriesTentativeAddress(t *testing.T) {
+	calls := 0
+	err := waitWindowsIPv4Ready(context.Background(), func() error {
+		calls++
+		if calls < 3 {
+			return &net.OpError{Op: "listen", Err: windows.WSAEADDRNOTAVAIL}
+		}
+		return nil
+	})
+	if err != nil || calls != 3 {
+		t.Fatalf("readiness calls=%d error=%v", calls, err)
+	}
+}
+
+func TestWindowsIPv4ReadinessPreservesPermanentErrors(t *testing.T) {
+	calls := 0
+	err := waitWindowsIPv4Ready(context.Background(), func() error {
+		calls++
+		return windows.WSAEACCES
+	})
+	if !errors.Is(err, windows.WSAEACCES) || calls != 1 {
+		t.Fatalf("readiness calls=%d error=%v", calls, err)
+	}
+}
+
+func TestWindowsIPv4ReadinessHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := waitWindowsIPv4Ready(ctx, func() error { return windows.WSAEADDRNOTAVAIL })
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("readiness error=%v", err)
+	}
+}
+
+func TestWindowsSetupPlanUsesDocumentedNetshForms(t *testing.T) {
+	runner := &recordingRunner{}
+	plan := windowsSetupPlanWithBinary(runner, "netsh.exe", "wc0", Config{
+		Name:  "wc0",
+		Local: netip.MustParseAddr("100.64.0.1"),
+		Peer:  netip.MustParseAddr("100.64.0.2"),
+		MTU:   DefaultMTU,
+	})
+	for _, step := range plan.steps {
+		if err := step.apply(context.Background()); err != nil {
+			t.Fatalf("apply %q: %v", step.label, err)
+		}
+	}
+	for i := len(plan.steps) - 1; i >= 0; i-- {
+		if err := plan.steps[i].undo(context.Background()); err != nil {
+			t.Fatalf("undo %q: %v", plan.steps[i].label, err)
+		}
+	}
+	want := []recordedCall{
+		{name: "netsh.exe", args: []string{"interface", "set", "interface", "name=wc0", "admin=enabled"}},
+		{name: "netsh.exe", args: []string{"interface", "ipv4", "set", "subinterface", "interface=wc0", "mtu=1420", "store=active"}},
+		{name: "netsh.exe", args: []string{"interface", "ipv4", "add", "address", "name=wc0", "address=100.64.0.1", "mask=255.255.255.255", "store=active"}},
+		{name: "netsh.exe", args: []string{"interface", "ipv4", "add", "route", "prefix=100.64.0.2/32", "interface=wc0", "store=active"}},
+		{name: "netsh.exe", args: []string{"interface", "ipv4", "delete", "route", "prefix=100.64.0.2/32", "interface=wc0", "store=active"}},
+		{name: "netsh.exe", args: []string{"interface", "ipv4", "delete", "address", "name=wc0", "address=100.64.0.1", "store=active"}},
+		{name: "netsh.exe", args: []string{"interface", "ipv4", "set", "subinterface", "interface=wc0", "mtu=1500", "store=active"}},
+		{name: "netsh.exe", args: []string{"interface", "set", "interface", "name=wc0", "admin=disabled"}},
+	}
+	if got := runner.calls(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("commands = %#v, want %#v", got, want)
+	}
+	if len(plan.cleanup) != 0 {
+		t.Fatalf("platform cleanup actions = %#v, want none because Wintun.Close owns adapter removal", plan.cleanup)
+	}
+}
+
+// This subprocess keeps Wintun loaded for exactly one generation for its
+// complete lifetime, as a real wirectl runtime does. No adapter is created.
+func TestBundledWintunRemainsLoadedForWireGuard(t *testing.T) {
+	if candidate := os.Getenv("WIRECTL_WINTUN_LOAD_HELPER"); candidate != "" {
+		if err := loadWintunDLL(candidate); err != nil {
+			t.Fatal(err)
+		}
+		if version := wintun.Version(); version == "unknown" {
+			t.Fatal("WireGuard lazy loader did not use the preloaded official DLL")
+		}
+		name, _ := windows.UTF16PtrFromString("wintun.dll")
+		var handle windows.Handle
+		if err := windows.GetModuleHandleEx(windows.GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, name, &handle); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := loadedWindowsModulePath(handle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected, _ := filepath.EvalSymlinks(candidate)
+		if !strings.EqualFold(loaded, expected) {
+			t.Fatalf("WireGuard module = %s, expected generation %s", loaded, expected)
+		}
+		other := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(candidate))), "3.0.0", "bin", "wintun.dll")
+		if err := os.MkdirAll(filepath.Dir(other), 0700); err != nil {
+			t.Fatal(err)
+		}
+		original, err := os.ReadFile(candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(other, original, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := loadWintunDLL(other); err == nil {
+			t.Fatal("mixed Wintun generations were accepted in one process")
+		}
+		t.Logf("verified retained Wintun generation: %s (version %s)", loaded, wintun.Version())
+		return
+	}
+	official := os.Getenv("WIRECTL_TEST_WINTUN")
+	if official == "" {
+		t.Skip("set WIRECTL_TEST_WINTUN to the verified official amd64 DLL to verify the Windows loader")
+	}
+	b, err := os.ReadFile(official)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	candidate := filepath.Join(root, ".wirectl", "versions", "2.0.0", "bin", "wintun.dll")
+	if err := os.MkdirAll(filepath.Dir(candidate), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(candidate, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(executable, "-test.run=^TestBundledWintunRemainsLoadedForWireGuard$", "-test.v")
+	command.Env = append(os.Environ(), "WIRECTL_WINTUN_LOAD_HELPER="+candidate)
+	output, err := command.CombinedOutput()
+	t.Log(string(output))
+	if err != nil {
+		t.Fatal("Windows generation loader validation failed", err)
+	}
+}

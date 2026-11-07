@@ -1,0 +1,37 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.2'
+          cache: false
+      - name: Test and vet
+        shell: bash
+        run: |
+          mkdir -p .cache/go-build .cache/go-mod .cache/tmp
+          export GOCACHE="$PWD/.cache/go-build" GOMODCACHE="$PWD/.cache/go-mod" GOTMPDIR="$PWD/.cache/tmp" TMPDIR="$PWD/.cache/tmp"
+          go test -race ./...
+          go vet ./...
+          python scripts/test-session.py
+          python scripts/test-media.py
+          python scripts/test-groups.py
+          python scripts/test-direct.py
+          python scripts/test-service.py
+      - name: Build and smoke test package
+        shell: bash
+        run: |
+          python scripts/package.py --version 0.0.0-ci
+          python scripts/test-package.py

@@ -1,0 +1,14 @@
+[
+  {
+    "repository": "https://github.com/k0ngk0ng/homebrew-tap",
+    "commit": "001ffe739d4dee88cc9446a5b01550273a1a973b",
+    "destination": "packaging/legacy/homebrew-tap",
+    "role": "historical packaging source; superseded by root scripts/manifests.py"
+  },
+  {
+    "repository": "https://github.com/k0ngk0ng/scoop-bucket",
+    "commit": "f15f21cabcf1c6627ea235eb2f48d4686db8f0f2",
+    "destination": "packaging/legacy/scoop-bucket",
+    "role": "historical packaging source; superseded by root scripts/manifests.py"
+  }
+]

@@ -1,0 +1,150 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      verify_tag:
+        description: Existing release tag to verify through package managers
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  build:
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.2'
+          cache: false
+      - name: Test and build
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p .cache/go-build .cache/go-mod .cache/tmp
+          export GOCACHE="$PWD/.cache/go-build" GOMODCACHE="$PWD/.cache/go-mod" GOTMPDIR="$PWD/.cache/tmp" TMPDIR="$PWD/.cache/tmp"
+          go test -race ./...
+          go vet ./...
+          python scripts/test-session.py
+          python scripts/test-media.py
+          python scripts/test-groups.py
+          python scripts/test-direct.py
+          python scripts/test-service.py
+          python scripts/package.py --version "$RELEASE_TAG"
+          python scripts/test-package.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.os }}
+          path: dist/wire-talk-*
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+          pattern: package-*
+      - name: Checksums and package definitions
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 scripts/manifests.py --version "$RELEASE_TAG"
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/wire-talk-*
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" dist/* --verify-tag --generate-notes
+  install-homebrew:
+    needs: publish
+    if: always() && (needs.publish.result == 'success' || github.event_name == 'workflow_dispatch')
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_ANALYTICS: '1'
+      WIRE_TALK_HOME: ${{ github.workspace }}/.cache/talk-state
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Homebrew/actions/setup-homebrew@082c94ee19e776205cfa8e43802917d1425e2fe7
+        with:
+          stable: true
+      - name: Install release through Homebrew and exercise host dispatch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.verify_tag || github.ref_name }}
+        run: |
+          mkdir -p .cache/package
+          gh release download "$RELEASE_TAG" --pattern '*talk.rb' --dir .cache/package
+          if [ ! -f .cache/package/wire-talk.rb ]; then
+            sed 's/^class Talk < Formula/class WireTalk < Formula/' .cache/package/talk.rb > .cache/package/wire-talk.rb
+          fi
+          brew tap k0ngk0ng/tap
+          if brew help trust >/dev/null 2>&1; then brew trust --formula k0ngk0ng/tap/wirectl; fi
+          cp .cache/package/wire-talk.rb "$(brew --repository k0ngk0ng/tap)/Formula/wire-talk.rb"
+          brew install k0ngk0ng/tap/wire-talk
+          brew test k0ngk0ng/tap/wire-talk
+          test "$(wirectl talk version)" = "${RELEASE_TAG#v}"
+          wirectl talk init
+          if wirectl talk update > .cache/update-output 2>&1; then exit 1; fi
+          grep 'brew upgrade' .cache/update-output
+  install-scoop:
+    needs: publish
+    if: always() && (needs.publish.result == 'success' || github.event_name == 'workflow_dispatch')
+    runs-on: windows-latest
+    env:
+      SCOOP: ${{ github.workspace }}/.cache/scoop
+      WIRE_TALK_HOME: ${{ github.workspace }}/.cache/talk-state
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Scoop in the disposable runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:SCOOP = [IO.Path]::GetFullPath($env:SCOOP)
+          "SCOOP=$env:SCOOP" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          New-Item -ItemType Directory -Path .cache -Force | Out-Null
+          Invoke-WebRequest https://get.scoop.sh -OutFile .cache/install-scoop.ps1
+          & .cache/install-scoop.ps1 -RunAsAdmin -ScoopDir $env:SCOOP
+          "$env:SCOOP/shims" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Install release through Scoop and exercise host dispatch
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.verify_tag || github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          scoop bucket add k0ngk0ng https://github.com/k0ngk0ng/scoop-bucket
+          gh release download $env:RELEASE_TAG --pattern '*talk.json' --dir .cache
+          if ($LASTEXITCODE -ne 0) { throw 'release download failed' }
+          if (!(Test-Path .cache/wire-talk.json)) { Copy-Item .cache/talk.json .cache/wire-talk.json }
+          Copy-Item .cache/wire-talk.json "$env:SCOOP/buckets/k0ngk0ng/bucket/wire-talk.json"
+          scoop install k0ngk0ng/wire-talk
+          $version = (& wirectl talk version).Trim()
+          if ($LASTEXITCODE -ne 0 -or $version -ne $env:RELEASE_TAG.TrimStart('v')) { throw 'host dispatch failed' }
+          wirectl talk init
+          if ($LASTEXITCODE -ne 0) { throw 'init failed' }
+          $output = & wirectl talk update 2>&1 | Out-String
+          $updateExit = $LASTEXITCODE
+          Write-Host "Update exit: $updateExit; output: $output"
+          if ($updateExit -eq 0 -or $output -notmatch 'scoop update') { throw 'package manager protection failed' }
+          exit 0 # The nonzero updater exit above is expected, and was asserted.

@@ -1,0 +1,353 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+    inputs:
+      version:
+        description: Release version passed to the cross-build job
+        required: false
+        type: string
+        default: snapshot
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: native-${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-24.04
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+          - name: macos
+            os: macos-14
+          - name: windows
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      WIRE_CONNECT_UPDATE_ADMIN_TEST: '1'
+      GOCACHE: ${{ github.workspace }}/.cache/go-build
+      GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
+      GOPATH: ${{ github.workspace }}/.cache/go
+      GOTMPDIR: ${{ github.workspace }}/.cache/tmp
+      TMPDIR: ${{ github.workspace }}/.cache/tmp
+      TEMP: ${{ github.workspace }}/.cache/tmp
+      TMP: ${{ github.workspace }}/.cache/tmp
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare repository-local Go paths
+        shell: bash
+        run: mkdir -p "$GOCACHE" "$GOMODCACHE" "$GOPATH" "$GOTMPDIR"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: go test -race -timeout 2m ./...
+      - run: go vet ./...
+
+  network-tun:
+    name: tun-${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-24.04
+            extension: ''
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            extension: ''
+          - name: macos
+            os: macos-14
+            extension: ''
+          - name: windows
+            os: windows-latest
+            extension: .exe
+    runs-on: ${{ matrix.os }}
+    env:
+      GOCACHE: ${{ github.workspace }}/.cache/go-build
+      GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
+      GOPATH: ${{ github.workspace }}/.cache/go
+      GOTMPDIR: ${{ github.workspace }}/.cache/tmp
+      TMPDIR: ${{ github.workspace }}/.cache/tmp
+      TEMP: ${{ github.workspace }}/.cache/tmp
+      TMP: ${{ github.workspace }}/.cache/tmp
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare repository-local Go paths
+        shell: bash
+        run: mkdir -p "$GOCACHE" "$GOMODCACHE" "$GOPATH" "$GOTMPDIR" "$GITHUB_WORKSPACE/.cache/network"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build integration test binary
+        shell: bash
+        env:
+          TEST_EXTENSION: ${{ matrix.extension }}
+        run: |
+          set -euo pipefail
+          go test -tags integration -timeout 2m -c -o ".cache/network/platform.test${TEST_EXTENSION}" ./internal/platform
+      - name: Build service lifecycle test binary
+        shell: bash
+        env:
+          TEST_EXTENSION: ${{ matrix.extension }}
+        run: |
+          set -euo pipefail
+          go test -tags integration -timeout 2m -c -o ".cache/network/service.test${TEST_EXTENSION}" ./internal/service
+      - name: Build service lifecycle helper
+        shell: bash
+        env:
+          TEST_EXTENSION: ${{ matrix.extension }}
+        run: |
+          set -euo pipefail
+          go build -trimpath -buildvcs=false -o ".cache/network/wire-connect-service-testutil${TEST_EXTENSION}" ./cmd/wire-connect-service-testutil
+      - name: Build current-user service lifecycle helper
+        shell: bash
+        env:
+          TEST_EXTENSION: ${{ matrix.extension }}
+        run: |
+          set -euo pipefail
+          go build -trimpath -buildvcs=false -o ".cache/network/wire-connect-user-service-testutil${TEST_EXTENSION}" ./cmd/wire-connect-user-service-testutil
+      - name: Build network helper integration utility
+        shell: bash
+        env:
+          TEST_EXTENSION: ${{ matrix.extension }}
+        run: |
+          set -euo pipefail
+          go build -trimpath -buildvcs=false -o ".cache/network/wire-connect-helper-testutil${TEST_EXTENSION}" ./cmd/wire-connect-helper-testutil
+      - name: Fetch adjacent Wintun runtime
+        if: matrix.name == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/fetch-wintun.sh "$PWD/.cache/network"
+      - name: Verify Wintun Authenticode signature
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/scripts/verify-wintun.ps1" -Path "$env:GITHUB_WORKSPACE/.cache/network/wintun.dll"
+      - name: Prepare Linux user service manager session
+        if: matrix.name == 'linux' || matrix.name == 'linux-arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          uid="$(id -u)"
+          user="$(id -un)"
+          sudo loginctl enable-linger "$user"
+          sudo systemctl start "user@${uid}.service"
+          echo "XDG_RUNTIME_DIR=/run/user/${uid}" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${uid}/bus" >> "$GITHUB_ENV"
+          for ((attempt = 0; attempt < 30; attempt++)); do
+            if XDG_RUNTIME_DIR="/run/user/${uid}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" systemctl --user show-environment >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "systemd user manager did not expose a usable bus" >&2
+          systemctl status "user@${uid}.service" --no-pager || true
+          exit 1
+      - name: Run current-user service lifecycle (Unix)
+        if: matrix.name != 'windows'
+        shell: bash
+        env:
+          WIRE_CONNECT_USER_SERVICE_INTEGRATION: '1'
+          WIRE_CONNECT_USER_SERVICE_REQUIRED: '1'
+          WIRE_CONNECT_USER_SERVICE_HELPER: ${{ github.workspace }}/.cache/network/wire-connect-user-service-testutil
+          WIRE_CONNECT_USER_SERVICE_STATE_ROOT: ${{ github.workspace }}/.cache/user-svc
+        run: |
+          set -euo pipefail
+          mkdir -p "$WIRE_CONNECT_USER_SERVICE_STATE_ROOT"
+          trap 'rm -rf "$WIRE_CONNECT_USER_SERVICE_STATE_ROOT"' EXIT
+          .cache/network/service.test -test.run '^TestRealUserServiceLifecycle$' -test.timeout=2m -test.v
+      - name: Run current-user service lifecycle (Windows)
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          $env:WIRE_CONNECT_USER_SERVICE_INTEGRATION = '1'
+          $env:WIRE_CONNECT_USER_SERVICE_REQUIRED = '1'
+          $env:WIRE_CONNECT_USER_SERVICE_HELPER = "$env:GITHUB_WORKSPACE/.cache/network/wire-connect-user-service-testutil.exe"
+          $env:WIRE_CONNECT_USER_SERVICE_STATE_ROOT = "$env:GITHUB_WORKSPACE/.cache/user-svc"
+          New-Item -ItemType Directory -Force -Path $env:WIRE_CONNECT_USER_SERVICE_STATE_ROOT | Out-Null
+          try {
+            & "$env:GITHUB_WORKSPACE/.cache/network/service.test.exe" '-test.run=^TestRealUserServiceLifecycle$' '-test.timeout=2m' '-test.v'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Remove-Item -LiteralPath $env:WIRE_CONNECT_USER_SERVICE_STATE_ROOT -Recurse -Force -ErrorAction SilentlyContinue
+          }
+      - name: Run real TUN and service lifecycle (Unix administrator)
+        if: matrix.name != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case '${{ matrix.name }}' in
+            linux|linux-arm64) service_state_root='/var/lib/wire-connect-integration' ;;
+            macos) service_state_root='/Library/wire-connect-integration' ;;
+            *) echo "unsupported Unix CI matrix entry: ${{ matrix.name }}" >&2; exit 2 ;;
+          esac
+          sudo env \
+            WIRE_CONNECT_NETWORK_TEST=1 \
+            WIRE_CONNECT_SERVICE_INTEGRATION=1 \
+            WIRE_CONNECT_SERVICE_HELPER="$GITHUB_WORKSPACE/.cache/network/wire-connect-service-testutil" \
+            WIRE_CONNECT_SERVICE_STATE_ROOT="$service_state_root" \
+            /bin/sh -c '
+              set -eu
+              state_root="$1"
+              platform_test="$2"
+              service_test="$3"
+              helper_testutil="$4"
+              mkdir -p "$state_root"
+              chmod 700 "$state_root"
+              trap '\''rm -rf "$state_root"'\'' EXIT
+              WIRE_CONNECT_HELPER_TESTUTIL="$helper_testutil" \
+                "$platform_test" -test.run "$5" -test.timeout=2m -test.v
+              "$service_test" -test.run "$6" -test.timeout=2m -test.v
+            ' sh \
+            "$service_state_root" \
+            "$GITHUB_WORKSPACE/.cache/network/platform.test" \
+            "$GITHUB_WORKSPACE/.cache/network/service.test" \
+            "$GITHUB_WORKSPACE/.cache/network/wire-connect-helper-testutil" \
+            '^(TestOpenRealTUNLifecycle|TestRealNetworkHelperLifecycle)$' \
+            '^TestRealServiceLifecycle$'
+      - name: Run real TUN lifecycle (Windows administrator)
+        if: ${{ !cancelled() && matrix.name == 'windows' }}
+        shell: pwsh
+        run: |
+          $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+          $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+          if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            throw 'The Windows TUN lifecycle test requires an elevated administrator runner.'
+          }
+          $env:WIRE_CONNECT_NETWORK_TEST = '1'
+          $env:WIRE_CONNECT_HELPER_TESTUTIL = "$env:GITHUB_WORKSPACE/.cache/network/wire-connect-helper-testutil.exe"
+          if (-not (Test-Path -LiteralPath $env:WIRE_CONNECT_HELPER_TESTUTIL -PathType Leaf)) {
+            throw "network helper integration utility is missing: $env:WIRE_CONNECT_HELPER_TESTUTIL"
+          }
+          $testArgs = @('-test.run=^(TestOpenRealTUNLifecycle|TestRealNetworkHelperLifecycle)$', '-test.timeout=2m', '-test.v')
+          & "$env:GITHUB_WORKSPACE/.cache/network/platform.test.exe" @testArgs
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          $env:WIRE_CONNECT_SERVICE_INTEGRATION = '1'
+          $env:WIRE_CONNECT_SERVICE_HELPER = "$env:GITHUB_WORKSPACE/.cache/network/wire-connect-service-testutil.exe"
+          $env:WIRE_CONNECT_SERVICE_STATE_ROOT = "$env:GITHUB_WORKSPACE/.cache/svc"
+          $serviceTestPath = "$env:GITHUB_WORKSPACE/.cache/network/service.test.exe"
+          if (-not (Test-Path -LiteralPath $serviceTestPath -PathType Leaf)) {
+            throw "service lifecycle test binary is missing: $serviceTestPath"
+          }
+          if (-not (Test-Path -LiteralPath $env:WIRE_CONNECT_SERVICE_HELPER -PathType Leaf)) {
+            throw "service lifecycle helper is missing: $env:WIRE_CONNECT_SERVICE_HELPER"
+          }
+          $serviceStateRoot = $env:WIRE_CONNECT_SERVICE_STATE_ROOT
+          New-Item -ItemType Directory -Force -Path $serviceStateRoot | Out-Null
+          $serviceArgs = @('-test.run=^TestRealServiceLifecycle$', '-test.timeout=2m', '-test.v')
+          $serviceExitCode = 0
+          try {
+            & $serviceTestPath @serviceArgs
+            $serviceExitCode = $LASTEXITCODE
+          } finally {
+            Remove-Item -LiteralPath $serviceStateRoot -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          if ($serviceExitCode -ne 0) {
+            exit $serviceExitCode
+          }
+
+  nat:
+    name: nat-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GOCACHE: ${{ github.workspace }}/.cache/go-build
+      GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
+      GOPATH: ${{ github.workspace }}/.cache/go
+      GOTMPDIR: ${{ github.workspace }}/.cache/tmp
+      TMPDIR: ${{ github.workspace }}/.cache/tmp
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare repository-local Go paths
+        shell: bash
+        run: mkdir -p "$GOCACHE" "$GOMODCACHE" "$GOPATH" "$GOTMPDIR" "$GITHUB_WORKSPACE/.cache/nat"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Install NAT test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y coreutils curl iproute2 iptables jq openssl procps tcpdump
+      - name: Build NAT test binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=0 go build -trimpath -buildvcs=false -o .cache/nat/wirectl-connect ./cmd/wirectl-connect
+          CGO_ENABLED=0 go build -trimpath -buildvcs=false -o .cache/nat/wire-connect-testutil ./cmd/wire-connect-testutil
+      - name: Run disposable NAT integration test
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo env WIRE_CONNECT_NAT_TEST=1 \
+            "$GITHUB_WORKSPACE/scripts/test-nat.sh" \
+            "$GITHUB_WORKSPACE/.cache/nat/wirectl-connect" \
+            "$GITHUB_WORKSPACE/.cache/nat/wire-connect-testutil"
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-24.04
+    env:
+      GOCACHE: ${{ github.workspace }}/.cache/go-build
+      GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
+      GOPATH: ${{ github.workspace }}/.cache/go
+      GOTMPDIR: ${{ github.workspace }}/.cache/tmp
+      TMPDIR: ${{ github.workspace }}/.cache/tmp
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare repository-local Go paths
+        shell: bash
+        run: mkdir -p "$GOCACHE" "$GOMODCACHE" "$GOPATH" "$GOTMPDIR"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Run govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+  crossbuild:
+    name: cross-build
+    runs-on: ubuntu-24.04
+    env:
+      GOCACHE: ${{ github.workspace }}/.cache/go-build
+      GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
+      GOPATH: ${{ github.workspace }}/.cache/go
+      GOTMPDIR: ${{ github.workspace }}/.cache/tmp
+      TMPDIR: ${{ github.workspace }}/.cache/tmp
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare repository-local Go paths
+        shell: bash
+        run: mkdir -p "$GOCACHE" "$GOMODCACHE" "$GOPATH" "$GOTMPDIR"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build all release targets
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${REQUESTED_VERSION:-snapshot}"
+          ./scripts/build-release.sh --version "$version"
+      - name: Upload cross-build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wire-connect-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,8 @@
+{
+  "version": "0.3.1",
+  "description": "Compatibility name for wire-talk",
+  "homepage": "https://github.com/k0ngk0ng/wire-talk",
+  "license": "MIT",
+  "depends": "k0ngk0ng/wire-talk",
+  "notes": "The package is now wire-talk. Use scoop update wire-talk; the command remains wirectl talk."
+}

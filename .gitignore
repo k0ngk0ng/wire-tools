@@ -1,0 +1,11 @@
+/wirectl
+/bin/
+/.cache/
+
+/dist/
+**/.cache/
+**/.work/
+**/.test-data/
+__pycache__/
+*.pyc
+.DS_Store
