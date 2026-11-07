@@ -12,6 +12,7 @@ import (
 
 	"github.com/k0ngk0ng/wire-tools/internal/app"
 	"github.com/k0ngk0ng/wire-tools/internal/host"
+	"github.com/k0ngk0ng/wire-tools/internal/installpath"
 )
 
 var version = "dev"
@@ -20,7 +21,7 @@ func main() {
 	// Updated bundles live in immutable generation directories. The executable
 	// selects dependencies from its own version before any feature is loaded.
 	if self, err := os.Executable(); err == nil {
-		if p, err := filepath.EvalSymlinks(self); err == nil {
+		if p, err := installpath.Resolve(self); err == nil {
 			self = p
 		}
 		root := filepath.Dir(self)

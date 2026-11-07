@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/k0ngk0ng/wire-tools/internal/installpath"
 	"github.com/k0ngk0ng/wire-tools/internal/state"
 )
 
@@ -68,7 +69,7 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	target, err = filepath.EvalSymlinks(target)
+	target, err = installpath.Resolve(target)
 	if err != nil {
 		return Result{}, err
 	}
