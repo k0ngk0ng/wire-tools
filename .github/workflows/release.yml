@@ -53,10 +53,10 @@ jobs:
         include:
           - target: linux-amd64
             runner: ubuntu-24.04
-            container: debian:bookworm
+            container: ubuntu:22.04
           - target: linux-arm64
             runner: ubuntu-24.04-arm
-            container: debian:bookworm
+            container: ubuntu:22.04
           - target: darwin-arm64
             runner: macos-15
           - target: windows-amd64
@@ -75,9 +75,10 @@ jobs:
       - name: Linux native build prerequisites and source repositories
         if: startsWith(matrix.target, 'linux')
         run: |
-          sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources
+          sed -n 's/^deb /deb-src /p' /etc/apt/sources.list > /etc/apt/sources.list.d/wirectl-sources.list
+          test -s /etc/apt/sources.list.d/wirectl-sources.list
           apt-get update
-          apt-get install -y --no-install-recommends build-essential git curl ca-certificates tar unzip zip python3 autoconf automake libtool pkg-config patch xz-utils bzip2 libssl-dev zlib1g-dev patchelf
+          apt-get install -y --no-install-recommends build-essential binutils git curl ca-certificates tar unzip zip python3 autoconf automake libtool pkg-config patch xz-utils bzip2 libssl-dev zlib1g-dev patchelf
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.version.outputs.sha }}

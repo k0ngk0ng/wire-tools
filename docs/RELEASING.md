@@ -37,7 +37,7 @@ python3 scripts/test-installed.py ./dist/wirectl-1.0.0-darwin-arm64.tar.gz
 2. 创建并推送稳定版本标签，例如 `v1.0.0`。
 3. 查看当前仓库的 `Release` Actions。
 
-工作流在 Linux amd64、Linux arm64、macOS arm64 和 Windows amd64 上分别原生验证。Linux 完整包在 Debian Bookworm 环境构建，以保存精确运行库对应源码。每个平台安装并检查自己的真实归档，通过后才汇总校验和、生成两种包定义、生成 GitHub 构建来源证明并发布同一 Release。
+工作流在 Linux amd64、Linux arm64、macOS arm64 和 Windows amd64 上分别原生验证。Linux 完整包在 Ubuntu 22.04 环境构建，并校验归档内所有 ELF 文件的 glibc 要求不超过 2.35；精确运行库对应源码随源码归档提供。每个平台安装并检查自己的真实归档，通过后才汇总校验和、生成两种包定义、生成 GitHub 构建来源证明并发布同一 Release。
 
 发布资产包括四个平台归档、对应源码归档、`SHA256SUMS`、`wirectl.rb` 和 `wirectl.json`。归档内只提供一个 `bin/wirectl`（Windows 为 `bin/wirectl.exe`）；底层工具与运行库放在同一安装树中。
 

@@ -1,4 +1,4 @@
-"""Download exact Debian corresponding sources for bundled runtime libraries."""
+"""Download exact Debian/Ubuntu corresponding sources for bundled runtime libraries."""
 import json
 from pathlib import Path
 import subprocess

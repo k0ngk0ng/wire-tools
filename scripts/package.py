@@ -145,6 +145,31 @@ def release_sources(env):
     return [name for name in names if name]
 
 
+def verify_linux_abi(stage, baseline=(2,35)):
+    required=()
+    count=0
+    for path in sorted(stage.rglob('*')):
+        if not path.is_file():
+            continue
+        with path.open('rb') as source:
+            if source.read(4)!=b'\x7fELF':
+                continue
+        count+=1
+        versions=subprocess.check_output(['readelf','--version-info',str(path)],text=True)
+        if 'GLIBC_ABI_DT_RELR' in versions and baseline<(2,36):
+            raise ValueError(str(path.relative_to(stage))+' requires GLIBC_ABI_DT_RELR; release baseline is '+'.'.join(map(str,baseline)))
+        needed=[tuple(map(int,value.split('.'))) for value in re.findall(r'GLIBC_([0-9]+(?:\.[0-9]+)+)',versions)]
+        newest=max(needed,default=())
+        if newest>baseline:
+            actual='.'.join(map(str,newest))
+            maximum='.'.join(map(str,baseline))
+            raise ValueError(str(path.relative_to(stage))+' requires glibc '+actual+'; release baseline is '+maximum)
+        required=max(required,newest)
+    return {'baseline':'.'.join(map(str,baseline)),
+            'required_glibc':'.'.join(map(str,required)) if required else 'none',
+            'elf_files':count}
+
+
 def source_archive(dist, version, stage, env):
     scratch=ROOT/'.cache/packages'/('wirectl-'+version+'-sources')
     shutil.rmtree(scratch,ignore_errors=True)
@@ -176,7 +201,7 @@ def source_archive(dist, version, stage, env):
             shutil.copy2(path,upstream/path.name)
     libraries=stage/'libexec/wirectl-download/runtime-libraries.json'
     if libraries.exists():
-        run([sys.executable,'components/download/scripts/bundle-runtime-sources.py',libraries,upstream/'debian'],env)
+        run([sys.executable,'components/download/scripts/bundle-runtime-sources.py',libraries,upstream/'runtime'],env)
     archive=dist/('wirectl-'+version+'-sources.tar.gz')
     with tarfile.open(archive,'w:gz') as package:
         package.add(source,arcname='wire-tools')
@@ -223,6 +248,12 @@ def main():
     dist.mkdir(parents=True,exist_ok=True)
     if args.full:
         bundle_full(stage,target,env)
+        if target.startswith('linux'):
+            abi=verify_linux_abi(stage)
+            (stage/'linux-abi.json').write_text(json.dumps(abi,indent=2)+'\n')
+            evidence=ROOT/'.cache/evidence'
+            evidence.mkdir(parents=True,exist_ok=True)
+            (evidence/'linux-abi.json').write_text(json.dumps(abi,indent=2)+'\n')
         if not target.startswith('windows'):
             source_archive(dist,version,stage,env)
     files=[p for p in sorted(stage.rglob('*')) if p.is_file()]

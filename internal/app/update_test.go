@@ -38,3 +38,10 @@ func TestUpdateAcceptsReleasedRuntimeWithStaleEndpoint(t *testing.T) {
 		t.Fatalf("stale endpoint was treated as a live runtime: %v", err)
 	}
 }
+
+func TestConnectSetupHelpDoesNotReceiveStateFlags(t *testing.T) {
+	t.Setenv("WIRECTL_HOME", t.TempDir())
+	if err := Run(context.Background(), []string{"connect", "setup", "--help"}, "fixture"); err != nil {
+		t.Fatalf("public setup routing corrupted arguments: %v", err)
+	}
+}

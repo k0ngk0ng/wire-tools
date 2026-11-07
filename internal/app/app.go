@@ -139,7 +139,7 @@ func Run(ctx context.Context, args []string, version string) error {
 		// Network setup is an OS-authorized installer operation with a real TTY;
 		// credentials and connection lifetimes still belong to the local API.
 		if feature == "connect" && len(tail) > 0 && tail[0] == "setup" {
-			return connect.Run(ctx, append(tail, "--state-dir", filepath.Join(home, "connect")), version, os.Stdin, os.Stdout, os.Stderr)
+			return connect.Run(ctx, tail, version, os.Stdin, os.Stdout, os.Stderr)
 		}
 		directory, err := os.Getwd()
 		if err != nil {

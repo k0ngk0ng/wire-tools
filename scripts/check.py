@@ -51,6 +51,7 @@ def main():
             raise SystemExit('verified Wintun runtime was not staged')
         env['WIRECTL_TEST_WINTUN']=str(wintun)
     run('shell-selection',[sys.executable,'scripts/test-shell-tools.py'],fatal=False)
+    run('linux-abi-tests',[sys.executable,'scripts/test-linux-abi.py'],fatal=False)
     run('go-test',['go','test','-race','-p','1','-timeout','5m','./...'],fatal=False)
     run('go-vet',['go','vet','./...'],fatal=False)
     if args.go_only:
