@@ -177,6 +177,7 @@ class TalkProcesses(unittest.TestCase):
                       'recording_sha256': hashlib.sha256(recording.read_bytes()).hexdigest()})
 
     def test_repeated_session_requests_with_json_body(self):
+        self.a.start()
         self.a.request('POST','/config',{'listen':'127.0.0.1:0','input':'none'})
         for _ in range(100):
             status=self.a.request('POST','/session',{})
