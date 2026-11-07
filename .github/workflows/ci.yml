@@ -9,6 +9,8 @@ on:
         type: string
         required: false
         default: ""
+env:
+  PYTHONUTF8: '1'
 permissions:
   contents: read
 jobs:

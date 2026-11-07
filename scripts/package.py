@@ -44,7 +44,7 @@ def run(args, env):
 
 
 def native_target(env):
-    return '-'.join(subprocess.check_output(['go','env','GOOS','GOARCH'],env=env,text=True).split())
+    return '-'.join(subprocess.check_output(['go','env','GOOS','GOARCH'],env=env,text=True,encoding='utf-8').split())
 
 
 def copy_runtime(source, destination):
@@ -76,7 +76,7 @@ def notices(stage, env, binary_only):
     if binary_only:
         return
     # Inventory only the modules compiled into the released executable.
-    data=subprocess.check_output(['go','list','-deps','-json','./cmd/wirectl'],cwd=ROOT,env=env,text=True)
+    data=subprocess.check_output(['go','list','-buildvcs=false','-deps','-json','./cmd/wirectl'],cwd=ROOT,env=env,text=True,encoding='utf-8')
     decoder=json.JSONDecoder()
     dependencies={}
     while data.strip():
@@ -100,11 +100,11 @@ def notices(stage, env, binary_only):
         if not found:
             raise ValueError('dependency is missing a root license notice: '+name)
         if name=='github.com/gen2brain/malgo':
-            header=(directory/'miniaudio.h').read_text()
+            header=(directory/'miniaudio.h').read_text(encoding='utf-8')
             (destination/'miniaudio-LICENSE.txt').write_text(header[header.rfind('ALTERNATIVE 1 - Public Domain'):])
         inventory.append({'module':name,'version':module.get('Version',''),'notices':found})
     (license_dir/'dependencies.json').write_text(json.dumps(inventory,indent=2)+'\n')
-    goroot=Path(subprocess.check_output(['go','env','GOROOT'],env=env,text=True).strip())
+    goroot=Path(subprocess.check_output(['go','env','GOROOT'],env=env,text=True,encoding='utf-8').strip())
     go_license=goroot/'LICENSE'
     if not go_license.is_file() and goroot.name=='libexec':
         go_license=goroot.parent/'LICENSE'
@@ -138,10 +138,11 @@ def bundle_full(stage, target, env):
 
 
 def release_sources(env):
-    status=subprocess.check_output(['git','status','--porcelain','--untracked-files=all'],cwd=ROOT,env=env,text=True)
+    git=['git','-c','safe.directory='+str(ROOT)]
+    status=subprocess.check_output(git+['status','--porcelain','--untracked-files=all'],cwd=ROOT,env=env,text=True,encoding='utf-8')
     if status.strip():
         raise ValueError('full source packaging requires a clean committed checkout; commit public source changes first')
-    names=subprocess.check_output(['git','ls-files','-z'],cwd=ROOT,env=env).decode().split('\0')
+    names=subprocess.check_output(git+['ls-files','-z'],cwd=ROOT,env=env).decode('utf-8').split('\0')
     return [name for name in names if name]
 
 
@@ -155,7 +156,7 @@ def verify_linux_abi(stage, baseline=(2,35)):
             if source.read(4)!=b'\x7fELF':
                 continue
         count+=1
-        versions=subprocess.check_output(['readelf','--version-info',str(path)],text=True)
+        versions=subprocess.check_output(['readelf','--version-info',str(path)],text=True,encoding='utf-8')
         if 'GLIBC_ABI_DT_RELR' in versions and baseline<(2,36):
             raise ValueError(str(path.relative_to(stage))+' requires GLIBC_ABI_DT_RELR; release baseline is '+'.'.join(map(str,baseline)))
         needed=[tuple(map(int,value.split('.'))) for value in re.findall(r'GLIBC_([0-9]+(?:\.[0-9]+)+)',versions)]
