@@ -176,6 +176,14 @@ class TalkProcesses(unittest.TestCase):
                       'recording_bytes': len(pcm), 'peak_pcm': max(abs(s) for s in samples),
                       'recording_sha256': hashlib.sha256(recording.read_bytes()).hexdigest()})
 
+    def test_repeated_session_requests_with_json_body(self):
+        self.a.request('POST','/config',{'listen':'127.0.0.1:0','input':'none'})
+        for _ in range(100):
+            status=self.a.request('POST','/session',{})
+            self.assertIn('version',status)
+        self.a.request('DELETE','/session')
+        self.assertFalse(self.a.status()['active'])
+
     def test_room_pair_media_leave_and_crash_recovery(self):
         self.pair('room')
         self.transfer_and_record()

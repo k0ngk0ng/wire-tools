@@ -2,6 +2,7 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -9,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -35,6 +37,19 @@ func Authenticate(token string, next http.Handler) http.Handler {
 		if strings.TrimSpace(r.Header.Get("Origin")) != "" {
 			JSON(w, 403, map[string]string{"error": "browser origins are not accepted"})
 			return
+		}
+		// Resource requests are bounded JSON, not streaming uploads. Consume
+		// the wire body before writing any response so Connection: close cannot
+		// reset Windows clients while an action ignores an empty JSON payload.
+		if r.Body != nil {
+			body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 2<<20))
+			_ = r.Body.Close()
+			if err != nil {
+				JSON(w, 413, map[string]string{"error": "local API request body exceeds limit or could not be read"})
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			r.ContentLength = int64(len(body))
 		}
 		next.ServeHTTP(w, r)
 	})

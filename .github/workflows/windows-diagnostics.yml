@@ -52,6 +52,16 @@ jobs:
         env:
           WIRECTL_TEST_BINARY: ${{ github.workspace }}\bin\wirectl.exe
         run: python tests/e2e/test_download_api.py
+      - name: Verify repeated API requests and audio sessions
+        env:
+          WIRECTL_TEST_BINARY: ${{ github.workspace }}\bin\wirectl.exe
+        run: |
+          $env:GOCACHE = "$PWD\.cache\go-build"
+          $env:GOMODCACHE = "$PWD\.cache\go-mod"
+          $env:GOTMPDIR = "$PWD\.cache\tmp"
+          go build -tags talk_test_audio -o bin/wirectl.exe ./cmd/wirectl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/e2e/test_talk_api.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
