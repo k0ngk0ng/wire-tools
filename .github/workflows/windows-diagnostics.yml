@@ -36,6 +36,16 @@ jobs:
           key: windows-diagnostics-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.sha }}
           restore-keys: |
             windows-diagnostics-${{ hashFiles('go.mod', 'go.sum') }}-
+      - name: Verify native shutdown fixture cleanup
+        shell: pwsh
+        run: |
+          $env:GOCACHE = "$PWD\.cache\go-build"
+          $env:GOMODCACHE = "$PWD\.cache\go-mod"
+          $env:GOTMPDIR = "$PWD\.cache\tmp"
+          $env:TMPDIR = $env:GOTMPDIR
+          New-Item -ItemType Directory -Force $env:GOTMPDIR | Out-Null
+          go test -race -timeout 2m -run TestRealAria2WatchdogFreezesBeforeDelayedShutdown ./components/download/internal/daemon
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build native runtime
         run: python scripts/check.py --build-only
       - name: Verify native download ownership and session recovery

@@ -84,14 +84,19 @@ func TestRealAria2WatchdogFreezesBeforeDelayedShutdown(t *testing.T) {
 	if err = child.Start(); err != nil {
 		t.Fatal(err)
 	}
-	done := make(chan error, 1)
-	go func() { done <- child.Wait() }()
+	done := make(chan struct{})
+	go func() { _ = child.Wait(); close(done) }()
 	aria := engine.NewAria2(port, secret)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		_ = aria.Call(ctx, "forceShutdown", nil, nil)
 		cancel()
-		_ = child.Process.Kill()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			_ = child.Process.Kill()
+			<-done
+		}
 	}()
 	for deadline := time.Now().Add(10 * time.Second); ; {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -177,13 +182,18 @@ func TestRealAria2WatchdogFreezesBeforeDelayedShutdown(t *testing.T) {
 	if err = restarted.Start(); err != nil {
 		t.Fatal(err)
 	}
-	restartedDone := make(chan error, 1)
-	go func() { restartedDone <- restarted.Wait() }()
+	restartedDone := make(chan struct{})
+	go func() { _ = restarted.Wait(); close(restartedDone) }()
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		_ = aria.Call(ctx, "forceShutdown", nil, nil)
 		cancel()
-		_ = restarted.Process.Kill()
+		select {
+		case <-restartedDone:
+		case <-time.After(5 * time.Second):
+			_ = restarted.Process.Kill()
+			<-restartedDone
+		}
 	}()
 	restore, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
