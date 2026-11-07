@@ -5,6 +5,7 @@ import hashlib
 import http.server
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import signal
@@ -56,6 +57,73 @@ class DownloadAPI(unittest.TestCase):
         threading.Thread(target=self.source.serve_forever, daemon=True).start()
         self.url = f'http://127.0.0.1:{self.source.server_port}/transfer.bin'
         self.start_runtime()
+        self._diagnostic_stages=set()
+        self.diagnostics('initialized',probe_version=True)
+
+    def diagnostics(self,stage,probe_version=False):
+        if os.environ.get('WIRECTL_DOWNLOAD_DIAGNOSTICS')!='1' or stage in self._diagnostic_stages:
+            return
+        self._diagnostic_stages.add(stage)
+        out=EVIDENCE/'download-diagnostics'/self._testMethodName/stage
+        out.mkdir(parents=True,exist_ok=True)
+        try:
+            def clean(text):
+                lines=[]
+                for line in text.splitlines():
+                    if any(key in line.lower() for key in ('cookie','authorization','rpc-secret','bearer ','token:')):
+                        continue
+                    lines.append(re.sub(r'(?i)\b[0-9a-f]{64}\b','[redacted]',line))
+                return '\n'.join(lines)+'\n'
+            for rel in ('runtime.log','download/logs/aria2.log','download/aria2/session.txt'):
+                file=self.dir/rel
+                if file.is_file():
+                    text=file.read_bytes()[-256*1024:].decode('utf-8',errors='replace')
+                    if rel.endswith('session.txt'):
+                        text='\n'.join(line for line in text.splitlines() if '://' not in line or line.strip()==self.url)
+                    (out/rel.replace('/','-')).write_text(clean(text))
+            jobs=self.dir/'download/jobs.json'
+            if jobs.exists():
+                data=json.loads(jobs.read_text())
+                data['jobs']=[j for j in data.get('jobs',[]) if j.get('source')==self.url]
+                (out/'jobs.json').write_text(json.dumps(data,indent=2)+'\n')
+            files=[]
+            for file in (self.dir/'download/downloads').glob('*'):
+                if file.is_file():
+                    files.append({'name':file.name,'size':file.stat().st_size,'sha256':hashlib.sha256(file.read_bytes()).hexdigest()})
+            (out/'files.json').write_text(json.dumps(files,indent=2)+'\n')
+            # The token remains in memory only. Persist a narrow native task
+            # view so restored GID changes can be distinguished from empty input.
+            config=self.dir/'download/aria2/aria2.conf'
+            if config.exists():
+                options=dict(line.split('=',1) for line in config.read_text().splitlines() if '=' in line)
+                secret=options.get('rpc-secret','');port=options.get('rpc-listen-port','')
+                if secret and port.isdecimal():
+                    tasks={}
+                    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                    keys=['gid','status','completedLength','totalLength','errorMessage']
+                    for method,args in [('tellActive',[keys]),('tellWaiting',[0,50,keys]),('tellStopped',[0,50,keys])]:
+                        body=json.dumps({'jsonrpc':'2.0','id':'diagnostics','method':'aria2.'+method,'params':['token:'+secret]+args}).encode()
+                        request=urllib.request.Request('http://127.0.0.1:'+port+'/jsonrpc',data=body,headers={'Content-Type':'application/json'})
+                        try:
+                            with opener.open(request,timeout=1) as response:
+                                tasks[method]=json.load(response).get('result')
+                        except Exception as error:
+                            tasks[method]={'error':type(error).__name__}
+                    (out/'native-tasks.json').write_text(json.dumps(tasks,indent=2)+'\n')
+            if probe_version:
+                candidates=[]
+                bundle=os.environ.get('WIRECTL_BUNDLE_DIR')
+                if bundle:
+                    candidates.append(Path(bundle)/'libexec/wirectl-download/bin'/('aria2c.exe' if os.name=='nt' else 'aria2c'))
+                found=shutil.which('aria2c')
+                if found:candidates.append(Path(found))
+                for binary in candidates:
+                    if binary.is_file():
+                        result=subprocess.run([str(binary),'--version'],text=True,capture_output=True,timeout=10)
+                        (out/'engine.txt').write_text(str(binary)+'\n'+clean(result.stdout+result.stderr))
+                        break
+        except Exception as error:
+            (out/'capture-error.txt').write_text(type(error).__name__+': '+str(error)+'\n')
 
     def start_runtime(self):
         proc = subprocess.run([str(BINARY), 'api', 'status', '--json'], cwd=ROOT,
@@ -77,7 +145,9 @@ class DownloadAPI(unittest.TestCase):
             self.fail(f'{method} {path}: HTTP {e.code}: {e.read().decode()}')
 
     def status(self, id):
-        return next(j for j in self.request('GET', '/v1/download/status')['jobs'] if j['id'] == id)
+        job=next(j for j in self.request('GET', '/v1/download/status')['jobs'] if j['id'] == id)
+        if job['status']=='unknown': self.diagnostics('native-task-unknown')
+        return job
 
     def wait(self, id, predicate, description):
         deadline = time.monotonic() + 30
@@ -94,6 +164,7 @@ class DownloadAPI(unittest.TestCase):
         self.assertEqual(hashlib.sha256(data).hexdigest(), hashlib.sha256(PAYLOAD).hexdigest())
 
     def tearDown(self):
+        self.diagnostics('before-teardown')
         try:
             self.request('POST', '/v1/runtime/shutdown', {})
             for _ in range(400):
@@ -101,6 +172,7 @@ class DownloadAPI(unittest.TestCase):
                     break
                 time.sleep(.025)
         finally:
+            self.diagnostics('after-shutdown')
             self.source.shutdown()
             self.source.server_close()
 
@@ -138,10 +210,12 @@ class DownloadAPI(unittest.TestCase):
         id = job['id']
         self.wait(id, lambda j: j['completed'] > int(os.environ.get('WIRECTL_TEST_CRASH_BYTES', '32768')), 'partial transfer')
         old_pid = self.ep['pid']
+        self.diagnostics('before-crash')
         os.kill(old_pid, signal.SIGTERM if os.name == 'nt' else signal.SIGKILL)
         time.sleep(.1)
         status = self.start_runtime()
         self.assertNotEqual(status['pid'], old_pid)
+        self.diagnostics('after-restart')
         self.verify_complete(id)
         self.assertTrue(any(x > 0 for x in self.range_offsets), self.range_offsets)
         self.assertEqual(len(self.request('GET', '/v1/download/status')['jobs']), 1)
@@ -151,12 +225,15 @@ class DownloadAPI(unittest.TestCase):
         id=job['id']
         self.wait(id,lambda j:j['completed']>32768,'partial transfer')
         old_pid=self.ep['pid']
+        self.diagnostics('before-orderly-stop')
         self.request('POST','/v1/runtime/shutdown',{})
         for _ in range(1200):
             if not (self.dir/'api.json').exists(): break
             time.sleep(.025)
         self.assertFalse((self.dir/'api.json').exists(),'graceful shutdown did not finish')
+        self.diagnostics('after-orderly-stop')
         status=self.start_runtime()
+        self.diagnostics('after-restart')
         self.assertNotEqual(status['pid'],old_pid)
         terminal=self.wait(id,lambda j:j['status'] in ('complete','error'),'resumed transfer')
         self.assertEqual(terminal['status'],'complete',terminal)

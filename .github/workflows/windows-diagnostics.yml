@@ -1,0 +1,53 @@
+name: Windows download diagnostics
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  download:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      CGO_ENABLED: '1'
+      GOTELEMETRY: off
+      PYTHONUTF8: '1'
+      WIRECTL_DOWNLOAD_DIAGNOSTICS: '1'
+      WIRECTL_TEST_SOURCE_DELAY: '.01'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v4
+        id: cache
+        with:
+          path: |
+            .cache/go-build
+            .cache/go-mod
+          key: windows-diagnostics-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            windows-diagnostics-${{ hashFiles('go.mod', 'go.sum') }}-
+      - name: Build native runtime
+        run: python scripts/check.py --build-only
+      - name: Verify native download ownership and session recovery
+        env:
+          WIRECTL_TEST_BINARY: ${{ github.workspace }}\bin\wirectl.exe
+        run: python tests/e2e/test_download_api.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-download-diagnostics
+          path: .cache/evidence/
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/cache/save@v4
+        if: always() && steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            .cache/go-build
+            .cache/go-mod
+          key: windows-diagnostics-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.sha }}
