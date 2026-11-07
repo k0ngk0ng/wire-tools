@@ -26,7 +26,8 @@ def main():
     evidence.mkdir(parents=True,exist_ok=True)
     (ROOT/'bin').mkdir(exist_ok=True)
     suffix='.exe' if os.name=='nt' else ''
-    def run(name,command):
+    failed=[]
+    def run(name,command,*,fatal=True):
         print('+ '+' '.join(map(str,command)),flush=True)
         with (evidence/(name+'.log')).open('w') as log:
             process=subprocess.Popen(list(map(str,command)),cwd=ROOT,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1)
@@ -34,7 +35,9 @@ def main():
                 print(line,end='',flush=True)
                 log.write(line)
             if process.wait()!=0:
-                raise SystemExit(process.returncode)
+                failed.append(name)
+                if fatal:
+                    raise SystemExit(process.returncode)
     if args.build_only:
         run('build',['go','build','-trimpath','-o',ROOT/'bin'/('wirectl'+suffix),'./cmd/wirectl'])
         return
@@ -47,20 +50,22 @@ def main():
         if not wintun.is_file():
             raise SystemExit('verified Wintun runtime was not staged')
         env['WIRECTL_TEST_WINTUN']=str(wintun)
-    run('shell-selection',[sys.executable,'scripts/test-shell-tools.py'])
-    run('go-test',['go','test','-race','-p','1','-timeout','5m','./...'])
-    run('go-vet',['go','vet','./...'])
+    run('shell-selection',[sys.executable,'scripts/test-shell-tools.py'],fatal=False)
+    run('go-test',['go','test','-race','-p','1','-timeout','5m','./...'],fatal=False)
+    run('go-vet',['go','vet','./...'],fatal=False)
     if args.go_only:
+        if failed: raise SystemExit('Failed checks: '+', '.join(failed))
         return
     run('e2e-build',['go','build','-tags','talk_test_audio','-o',ROOT/'bin'/('wirectl-e2e'+suffix),'./cmd/wirectl'])
     env['WIRECTL_TEST_BINARY']=str(ROOT/'bin'/('wirectl-e2e'+suffix))
-    run('e2e',[sys.executable,'tests/e2e/test_unified.py'])
-    run('download-e2e',[sys.executable,'tests/e2e/test_download_api.py'])
-    run('talk-e2e',[sys.executable,'tests/e2e/test_talk_api.py'])
-    run('update-e2e',[sys.executable,'tests/e2e/test_update.py'])
-    run('connect-cli-e2e',[sys.executable,'tests/e2e/test_connect_cli.py'])
-    run('terminal-e2e',[sys.executable,'tests/e2e/test_terminal.py'])
-    run('package-e2e',[sys.executable,'scripts/test-package.py'])
+    run('e2e',[sys.executable,'tests/e2e/test_unified.py'],fatal=False)
+    run('download-e2e',[sys.executable,'tests/e2e/test_download_api.py'],fatal=False)
+    run('talk-e2e',[sys.executable,'tests/e2e/test_talk_api.py'],fatal=False)
+    run('update-e2e',[sys.executable,'tests/e2e/test_update.py'],fatal=False)
+    run('connect-cli-e2e',[sys.executable,'tests/e2e/test_connect_cli.py'],fatal=False)
+    run('terminal-e2e',[sys.executable,'tests/e2e/test_terminal.py'],fatal=False)
+    run('package-e2e',[sys.executable,'scripts/test-package.py'],fatal=False)
+    if failed: raise SystemExit('Failed checks: '+', '.join(failed))
 
 if __name__=='__main__':
     main()

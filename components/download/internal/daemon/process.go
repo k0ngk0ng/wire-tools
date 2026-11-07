@@ -22,6 +22,8 @@ type process struct {
 	err         error
 	log         *os.File
 	stopTimeout time.Duration
+	requestStop func() bool
+	ownership   *os.File
 }
 
 func startProcess(binary string, args []string, logPath string) (*process, error) {
@@ -58,7 +60,19 @@ func (p *process) stop() {
 		return
 	default:
 	}
-	_ = p.cmd.Process.Signal(syscall.SIGTERM)
+	graceful := false
+	if p.ownership != nil {
+		_ = p.ownership.Close()
+		graceful = true
+	}
+	if p.requestStop != nil {
+		graceful = p.requestStop()
+	}
+	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil && !graceful {
+		_ = p.cmd.Process.Kill()
+		<-p.done
+		return
+	}
 	select {
 	case <-p.done:
 	case <-time.After(func() time.Duration {

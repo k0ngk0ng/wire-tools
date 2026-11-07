@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -17,9 +18,10 @@ import (
 )
 
 type engineSpec struct {
-	Binary string   `json:"binary"`
-	Args   []string `json:"args"`
-	Log    string   `json:"log"`
+	Binary        string   `json:"binary"`
+	Args          []string `json:"args"`
+	Log           string   `json:"log"`
+	OwnershipPipe bool     `json:"ownership_pipe,omitempty"`
 }
 type engineOwner struct {
 	Address string `json:"address"`
@@ -51,7 +53,7 @@ func startOwnedProcess(binary string, args []string, logPath string) (*process, 
 	if err != nil {
 		return nil, err
 	}
-	spec, err := json.Marshal(engineSpec{Binary: binary, Args: args, Log: logPath})
+	spec, err := json.Marshal(engineSpec{Binary: binary, Args: args, Log: logPath, OwnershipPipe: true})
 	if err != nil {
 		return nil, err
 	}
@@ -59,16 +61,25 @@ func startOwnedProcess(binary string, args []string, logPath string) (*process, 
 	if err != nil {
 		return nil, err
 	}
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		log.Close()
+		return nil, err
+	}
 	cmd := exec.Command(self, "__download-engine", string(spec))
+	cmd.Stdin = reader
 	cmd.Stdout = log
 	cmd.Stderr = log
 	cmd.Env = append(os.Environ(), "WIRECTL_ENGINE_OWNER="+string(endpoint))
 	if err = cmd.Start(); err != nil {
+		reader.Close()
+		writer.Close()
 		log.Close()
 		return nil, err
 	}
-	p := &process{cmd: cmd, done: make(chan struct{}), log: log, stopTimeout: 20 * time.Second}
-	go func() { p.err = cmd.Wait(); log.Close(); close(p.done) }()
+	reader.Close()
+	p := &process{cmd: cmd, done: make(chan struct{}), log: log, stopTimeout: 20 * time.Second, ownership: writer}
+	go func() { p.err = cmd.Wait(); writer.Close(); log.Close(); close(p.done) }()
 	return p, nil
 }
 func validateEngineOwner(owner engineOwner) error {
@@ -91,6 +102,14 @@ func RunEngine(ctx context.Context, args []string) error {
 	}
 	if spec.Binary == "" || !filepath.IsAbs(spec.Log) {
 		return errors.New("invalid engine watchdog paths")
+	}
+	if spec.OwnershipPipe {
+		owned, cancel := context.WithCancel(ctx)
+		defer cancel()
+		ctx = owned
+		// Closing the parent's writer requests shutdown; an API crash produces
+		// the same EOF automatically on every supported OS, including Windows.
+		go func() { _, _ = io.Copy(io.Discard, os.Stdin); cancel() }()
 	}
 	var owner engineOwner
 	if err := json.Unmarshal([]byte(os.Getenv("WIRECTL_ENGINE_OWNER")), &owner); err != nil {
@@ -151,10 +170,14 @@ func RunEngine(ctx context.Context, args []string) error {
 	if !alive() {
 		return errors.New("engine owner exited before startup")
 	}
+	if err = protectEngineProcessTree(); err != nil {
+		return err
+	}
 	child, err := startProcess(spec.Binary, spec.Args, spec.Log)
 	if err != nil {
 		return err
 	}
+	child.requestStop = func() bool { return stopEngineProtocol(spec) }
 	defer child.stop()
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
