@@ -57,10 +57,19 @@ class PlatformPackaging(unittest.TestCase):
 
     def test_foreign_owner_checkout_is_trusted_only_for_release_commands(self):
         env=self.git_fixture()
+        command=['git','-C',str(self.root),'status','--porcelain']
+        before=subprocess.run(command,env=env,capture_output=True,text=True)
+        trust_command=['git','config','--global','--get-all','safe.directory']
+        trust_before=subprocess.run(trust_command,env=env,capture_output=True,text=True)
         with patch.object(distribution,'ROOT',self.root):
             self.assertEqual(distribution.release_sources(env),[])
-        result=subprocess.run(['git','-C',str(self.root),'status','--porcelain'],env=env,capture_output=True,text=True)
-        self.assertNotEqual(result.returncode,0,'the operation must not globally trust the fixture')
+        after=subprocess.run(command,env=env,capture_output=True,text=True)
+        trust_after=subprocess.run(trust_command,env=env,capture_output=True,text=True)
+        # Older Git ignores its test-only owner override. Preserve the same
+        # trust outcome and config in either version; supported versions must
+        # continue to reject the foreign owner outside the scoped command.
+        self.assertEqual(after.returncode,before.returncode)
+        self.assertEqual((trust_after.returncode,trust_after.stdout),(trust_before.returncode,trust_before.stdout))
 
     def test_dirty_foreign_owner_checkout_still_rejects_sources(self):
         env=self.git_fixture()
