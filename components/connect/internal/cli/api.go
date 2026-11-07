@@ -317,6 +317,16 @@ func (a app) resourceConnect(ctx context.Context, args []string, resume bool) er
 		return err
 	}
 	waitForeground := *foreground || !*background
+	if waitForeground {
+		// Cancellation can arrive during a status request, before the select
+		// below. Always release this explicit foreground connection on exit.
+		defer func() {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = api.Request(stopCtx, "DELETE", resourcePath(c.name), nil, nil)
+		}()
+	}
+
 	lastCode := ""
 	for {
 		if err := api.Request(ctx, "GET", resourcePath(c.name), nil, &connection); err != nil {
@@ -339,11 +349,6 @@ func (a app) resourceConnect(ctx context.Context, args []string, resume bool) er
 		}
 		select {
 		case <-ctx.Done():
-			if waitForeground {
-				stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				_ = api.Request(stopCtx, "DELETE", resourcePath(c.name), nil, nil)
-				cancel()
-			}
 			return ctx.Err()
 		case <-time.After(200 * time.Millisecond):
 		}

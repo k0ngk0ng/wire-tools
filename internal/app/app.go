@@ -2,13 +2,11 @@
 package app
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,7 +19,6 @@ import (
 	talkcmd "github.com/k0ngk0ng/wire-tools/components/talk/command"
 	"github.com/k0ngk0ng/wire-tools/internal/host"
 	"github.com/k0ngk0ng/wire-tools/internal/update"
-	"golang.org/x/term"
 )
 
 const help = `wirectl — encrypted connections, downloads and conversations
@@ -123,6 +120,8 @@ func Run(ctx context.Context, args []string, version string) error {
 		if terminalFrontend(feature, tail) {
 			_ = os.Setenv("WIRECTL_HOME", home)
 			_ = os.Setenv("WIRECTL_API_CLIENT", "1")
+			_ = os.Setenv("WIRECTL_CONNECT_HOME", filepath.Join(home, "connect"))
+			_ = os.Setenv("WIRE_TALK_HOME", filepath.Join(home, "talk"))
 			switch feature {
 			case "download":
 				return downloadcmd.Run(ctx, tail, version)
@@ -141,29 +140,11 @@ func Run(ctx context.Context, args []string, version string) error {
 		if feature == "connect" && len(tail) > 0 && tail[0] == "setup" {
 			return connect.Run(ctx, append(tail, "--state-dir", filepath.Join(home, "connect")), version, os.Stdin, os.Stdout, os.Stderr)
 		}
-		input := ""
-		if feature == "connect" && len(tail) > 0 && tail[0] == "login" {
-			fmt.Fprint(os.Stderr, "Server enrollment token: ")
-			if term.IsTerminal(int(os.Stdin.Fd())) {
-				secret, readErr := term.ReadPassword(int(os.Stdin.Fd()))
-				input, err = string(secret)+"\n", readErr
-				clear(secret)
-				fmt.Fprintln(os.Stderr)
-			} else {
-				input, err = bufio.NewReader(io.LimitReader(os.Stdin, 4097)).ReadString('\n')
-			}
-			if err != nil && !errors.Is(err, io.EOF) {
-				return err
-			}
-			if len(input) > 4096 {
-				return errors.New("enrollment token exceeds size limit")
-			}
-		}
 		directory, err := os.Getwd()
 		if err != nil {
 			return err
 		}
-		body, _ := json.Marshal(host.CommandRequest{Args: tail, Directory: directory, Input: input})
+		body, _ := json.Marshal(host.CommandRequest{Args: tail, Directory: directory, Input: ""})
 		resp, err := c.Open(ctx, "POST", "/v1/commands/"+feature, body)
 		if err != nil {
 			return err
@@ -237,30 +218,42 @@ func updateCommand(ctx context.Context, c *api.Client, args []string) error {
 	}
 	// Updating is an installation transaction. Stop the old runtime after the
 	// verified replacement, so subsequent calls launch the new binary.
-	result, err := update.Run(ctx, o)
+	for _, path := range []*string{&o.Archive, &o.Checksums} {
+		if *path != "" {
+			absolute, err := filepath.Abs(*path)
+			if err != nil {
+				return err
+			}
+			*path = absolute
+		}
+	}
+	old, err := c.Ensure(ctx)
 	if err != nil {
 		return err
 	}
-	old, endpointErr := c.Endpoint()
-	if endpointErr == nil {
-		if err := c.RequestExisting(ctx, "POST", "/v1/runtime/shutdown", map[string]any{}, nil); err == nil {
-			deadline := time.Now().Add(45 * time.Second)
-			for {
-				current, err := c.Endpoint()
-				if err != nil || current.Token != old.Token {
-					break
-				}
-				if time.Now().After(deadline) {
-					return errors.New("update installed, but the previous runtime did not finish shutting down")
-				}
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-time.After(50 * time.Millisecond):
-				}
-			}
+	var result struct {
+		Version string `json:"version"`
+	}
+	err = c.Request(ctx, "POST", "/v1/update", map[string]string{"version": o.Version, "archive": o.Archive, "checksums": o.Checksums}, &result)
+	if err != nil {
+		return err
+	}
+	deadline := time.Now().Add(45 * time.Second)
+	for {
+		current, err := c.Endpoint()
+		if err != nil || current.Token != old.Token {
+			break
+		}
+		if time.Now().After(deadline) {
+			return errors.New("update installed, but the previous runtime did not finish shutting down")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
 		}
 	}
+
 	fmt.Println("Installed", result.Version, "· all features use the same release")
 	return nil
 }
@@ -296,6 +289,8 @@ func terminalFrontend(feature string, args []string) bool {
 		return strings.Contains(args[0], "://") || strings.HasPrefix(args[0], "magnet:") || strings.HasSuffix(strings.ToLower(args[0]), ".torrent")
 	case "talk":
 		return args[0] == "watch" || args[0] == "levels"
+	case "connect":
+		return args[0] != "setup" && args[0] != "serve" && args[0] != "update"
 	}
 	return false
 }

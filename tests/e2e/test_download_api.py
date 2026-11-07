@@ -146,6 +146,22 @@ class DownloadAPI(unittest.TestCase):
         self.assertTrue(any(x > 0 for x in self.range_offsets), self.range_offsets)
         self.assertEqual(len(self.request('GET', '/v1/download/status')['jobs']), 1)
 
+    def test_graceful_restart_recovers_partial(self):
+        job=self.request('POST','/v1/download/jobs',{'source':self.url})
+        id=job['id']
+        self.wait(id,lambda j:j['completed']>32768,'partial transfer')
+        old_pid=self.ep['pid']
+        self.request('POST','/v1/runtime/shutdown',{})
+        for _ in range(1200):
+            if not (self.dir/'api.json').exists(): break
+            time.sleep(.025)
+        self.assertFalse((self.dir/'api.json').exists(),'graceful shutdown did not finish')
+        status=self.start_runtime()
+        self.assertNotEqual(status['pid'],old_pid)
+        terminal=self.wait(id,lambda j:j['status'] in ('complete','error'),'resumed transfer')
+        self.assertEqual(terminal['status'],'complete',terminal)
+        self.verify_complete(id)
+
     def test_concurrent_submissions_are_idempotent(self):
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
             jobs = list(pool.map(lambda _: self.request('POST', '/v1/download/jobs', {'source': self.url}), range(10)))

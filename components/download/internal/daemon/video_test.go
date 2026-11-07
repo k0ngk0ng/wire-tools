@@ -3,10 +3,12 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -15,22 +17,45 @@ import (
 	"github.com/k0ngk0ng/wire-tools/components/download/internal/video"
 )
 
+func init() {
+	if os.Getenv("WIRE_DAEMON_VIDEO_HELPER") != "1" || !strings.HasPrefix(filepath.Base(os.Args[0]), "yt-dlp-daemon-fixture") {
+		return
+	}
+	for _, arg := range os.Args[1:] {
+		if arg == "--dump-single-json" {
+			if os.Getenv("WIRE_DAEMON_VIDEO_SLOW") == "1" {
+				time.Sleep(time.Second)
+			}
+			fmt.Println(`{"entries":[{"id":"101","formats":[{}]},{"id":"102","formats":[{}]}]}`)
+			os.Exit(0)
+		}
+	}
+	// Downloads stay alive long enough to exercise pause/remove deterministically.
+	// Backend cancellation terminates this direct native child on every OS.
+	time.Sleep(5 * time.Second)
+	os.Exit(1)
+}
+
 func videoStore(t *testing.T) (*Store, *video.Backend, string) {
 	t.Helper()
 	dir := t.TempDir()
-	script := filepath.Join(dir, "yt-dlp")
-	body := `#!/bin/sh
-for arg in "$@"; do
- if test "$arg" = --dump-single-json; then
-  printf '%s\n' '{"entries":[{"id":"101","formats":[{}]},{"id":"102","formats":[{}]}]}'
-  exit 0
- fi
-done
-exit 1
-`
-	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
+	name := "yt-dlp-daemon-fixture"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	script := filepath.Join(dir, name)
+	exe, err := os.Executable()
+	if err != nil {
 		t.Fatal(err)
 	}
+	binary, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(script, binary, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WIRE_DAEMON_VIDEO_HELPER", "1")
 	opts := video.Options{Binary: script, FFmpeg: script, Deno: script, StateDir: dir, Downloads: filepath.Join(dir, "downloads"), Max: 1}
 	b := video.New(opts)
 	t.Cleanup(func() { b.Close() })
@@ -108,11 +133,8 @@ func TestVideoSubmissionHTTPAndNoHTMLFallback(t *testing.T) {
 	}
 }
 func TestVideoResolutionDoesNotLockStore(t *testing.T) {
-	s, _, dir := videoStore(t)
-	script := filepath.Join(dir, "yt-dlp")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 1\nprintf '%s' '{\"id\":\"101\",\"formats\":[{}]}'\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
+	s, _, _ := videoStore(t)
+	t.Setenv("WIRE_DAEMON_VIDEO_SLOW", "1")
 	done := make(chan struct{})
 	go func() { defer close(done); _, _ = s.Submit(context.Background(), "https://x.com/a/status/123") }()
 	time.Sleep(50 * time.Millisecond)

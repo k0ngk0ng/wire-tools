@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"github.com/k0ngk0ng/wire-tools/components/download/internal/private"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,7 +15,7 @@ func atomicWrite(path string, data []byte) error {
 	}
 	tmp := f.Name()
 	defer os.Remove(tmp)
-	if err = f.Chmod(0600); err == nil {
+	if err = private.File(f.Name()); err == nil {
 		_, err = f.Write(data)
 	}
 	if err == nil {

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"github.com/k0ngk0ng/wire-tools/components/download/internal/private"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,9 +18,8 @@ func TestSessionScopesCookiesAndPreservesPrivacy(t *testing.T) {
 	if err := Save(dir, s); err != nil {
 		t.Fatal(err)
 	}
-	st, _ := os.Stat(sessionPath(dir, s.Origin))
-	if st.Mode().Perm() != 0600 {
-		t.Fatal(st.Mode())
+	if err := private.Check(sessionPath(dir, s.Origin)); err != nil {
+		t.Fatal(err)
 	}
 	loaded, err := Load(dir, s.Origin+"/private/file")
 	if err != nil {

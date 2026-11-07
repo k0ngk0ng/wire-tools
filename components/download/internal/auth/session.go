@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/k0ngk0ng/wire-tools/components/download/internal/private"
 	"golang.org/x/net/publicsuffix"
 )
 
@@ -92,7 +93,7 @@ func Save(dir string, s Session) error {
 		return errors.New("browser session is too large")
 	}
 	path := sessionPath(dir, s.Origin)
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := private.Dir(filepath.Dir(path)); err != nil {
 		return err
 	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".session-*")
@@ -100,7 +101,7 @@ func Save(dir string, s Session) error {
 		return err
 	}
 	defer os.Remove(f.Name())
-	if err = f.Chmod(0600); err == nil {
+	if err = private.File(f.Name()); err == nil {
 		_, err = f.Write(b)
 	}
 	if err == nil {
@@ -133,15 +134,18 @@ func Load(dir, rawURL string) (*Session, error) {
 		return nil, nil
 	}
 	path := sessionPath(dir, origin)
-	st, err := os.Stat(path)
+	st, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if !st.Mode().IsRegular() || st.Size() > 1<<20 || st.Mode().Perm()&0077 != 0 {
-		return nil, errors.New("login session must be a private file (mode 600)")
+	if !st.Mode().IsRegular() || st.Size() > 1<<20 {
+		return nil, errors.New("login session must be a bounded regular file")
+	}
+	if err = private.Check(path); err != nil {
+		return nil, fmt.Errorf("login session is not private: %w", err)
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {

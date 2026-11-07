@@ -303,7 +303,7 @@ func (h *HTTP) finish(t *httpTask, err error) {
 		return
 	}
 	if err != nil {
-		if h.closed {
+		if h.closed || h.ctx.Err() != nil {
 			t.Item.Status = "waiting"
 		} else {
 			t.Item.Status = "error"

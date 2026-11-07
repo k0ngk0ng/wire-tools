@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/k0ngk0ng/wire-tools/components/download/internal/private"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -41,8 +43,15 @@ func TestSource(t *testing.T) {
 	}
 }
 
-// A real subprocess exercises cancellation, stdout framing and process waits.
-func TestVideoHelper(t *testing.T) {
+// A copied native test executable exercises cancellation, stdout framing and
+// process waits without depending on Unix shebang handling.
+func init() {
+	if os.Getenv("WIRE_VIDEO_HELPER") == "1" && strings.HasPrefix(filepath.Base(os.Args[0]), "yt-dlp-fixture") {
+		runVideoHelper()
+	}
+}
+
+func runVideoHelper() {
 	if os.Getenv("WIRE_VIDEO_HELPER") != "1" {
 		return
 	}
@@ -85,9 +94,16 @@ func helper(t *testing.T) *Backend {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := filepath.Join(dir, "yt-dlp")
-	body := "#!/bin/sh\nexec '" + strings.ReplaceAll(exe, "'", "'\\''") + "' -test.run=TestVideoHelper -- \"$@\"\n"
-	if err = os.WriteFile(script, []byte(body), 0700); err != nil {
+	name := "yt-dlp-fixture"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	script := filepath.Join(dir, name)
+	binary, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(script, binary, 0700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("WIRE_VIDEO_HELPER", "1")
@@ -141,6 +157,19 @@ func TestDownloadPauseResumeAndRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	await(t, b, "one", "active")
+	// Device/process startup can be slower than the scheduler's active state,
+	// especially for Windows race binaries. Pause only after real partial I/O.
+	partial := filepath.Join(b.opts.Downloads, specs[0].Filename()+".mp4.part")
+	deadline := time.Now().Add(8 * time.Second)
+	for {
+		if _, err = os.Stat(partial); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("helper never wrote partial output", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if err = b.Pause(context.Background(), "one"); err != nil {
 		t.Fatal(err)
 	}
@@ -235,8 +264,7 @@ func TestCookieExportIsolationAndCleanup(t *testing.T) {
 	if path == "" || strings.Contains(strings.Join(cmd.Args, " "), "private-value") {
 		t.Fatal("invalid cookie arguments")
 	}
-	st, err := os.Stat(path)
-	if err != nil || st.Mode().Perm() != 0600 {
+	if err := private.Check(path); err != nil {
 		t.Fatal("cookie file permissions", err)
 	}
 	data, err := os.ReadFile(path)

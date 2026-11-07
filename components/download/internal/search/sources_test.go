@@ -2,6 +2,7 @@ package search
 
 import (
 	"encoding/json"
+	"github.com/k0ngk0ng/wire-tools/components/download/internal/private"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,12 +47,8 @@ func TestSourcesRoundTripIsPrivateAndAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, searchSourcesFile)
-	info, err := os.Stat(path)
-	if err != nil {
+	if err := private.Check(path); err != nil {
 		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0600 {
-		t.Fatalf("source mode = %o", info.Mode().Perm())
 	}
 	loaded, err := LoadSources(dir)
 	if err != nil || len(loaded) != 1 || loaded[0].APIKey != secret {

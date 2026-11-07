@@ -23,6 +23,7 @@ err := client.Request(ctx, "GET", "/v1/status", nil, &status)
 
 | 方法 | 路径 | 请求与结果 |
 |---|---|---|
+| `POST` | `/v1/update` | 安装统一最新版本；可传 `version`，或绝对路径 `archive`、`checksums`，成功后旧运行时退出 |
 | `GET` | `/v1/status` | 统一版本、PID、API 版本和能力列表 |
 | `GET` | `/v1/download/status` | 下载任务及引擎状态 |
 | `GET` | `/v1/download/config` | 隐藏 RPC secret 的配置概览 |

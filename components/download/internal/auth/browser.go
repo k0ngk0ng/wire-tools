@@ -17,6 +17,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/k0ngk0ng/wire-tools/components/download/internal/filelock"
+	"github.com/k0ngk0ng/wire-tools/components/download/internal/private"
 )
 
 type BrowserOptions struct {
@@ -95,7 +96,7 @@ func Capture(ctx context.Context, dir, target string, options BrowserOptions, co
 		return Session{}, err
 	}
 	profile := filepath.Join(dir, "browser", strings.TrimSuffix(filepath.Base(sessionPath(dir, origin)), ".json"))
-	if err = os.MkdirAll(profile, 0700); err != nil {
+	if err = private.Dir(profile); err != nil {
 		return Session{}, err
 	}
 	lock, err := os.OpenFile(filepath.Join(profile, "login.lock"), os.O_CREATE|os.O_RDWR, 0600)

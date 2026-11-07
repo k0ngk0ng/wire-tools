@@ -1,6 +1,7 @@
 package video
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -8,12 +9,50 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/k0ngk0ng/wire-tools/components/download/internal/engine"
 )
+
+// This native fixture replaces only metadata extraction. All downloads and
+// media merging still run through the actual packaged yt-dlp and ffmpeg.
+func init() {
+	if os.Getenv("WIRE_REAL_VIDEO_HELPER") != "1" || !strings.HasPrefix(filepath.Base(os.Args[0]), "yt-dlp-real-fixture") {
+		return
+	}
+	args := os.Args[1:]
+	for _, arg := range args {
+		if arg == "--dump-single-json" {
+			data, err := os.ReadFile(os.Getenv("WIRE_VIDEO_INFO_FILE"))
+			if err != nil {
+				os.Exit(1)
+			}
+			os.Stdout.Write(data)
+			os.Exit(0)
+		}
+	}
+	for i, arg := range args {
+		if arg == "--" {
+			args = args[:i]
+			break
+		}
+	}
+	args = append(args, "--load-info-json", os.Getenv("WIRE_VIDEO_INFO_FILE"))
+	command := exec.Command(os.Getenv("WIRE_REAL_YTDLP"), args...)
+	var diagnostic bytes.Buffer
+	command.Stdout = os.Stdout
+	command.Stderr = &diagnostic
+	err := command.Run()
+	os.WriteFile(os.Getenv("WIRE_TEST_ERROR_LOG"), diagnostic.Bytes(), 0600)
+	os.Stderr.Write(diagnostic.Bytes())
+	if err != nil {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
 
 // Exercise the actual packaged yt-dlp + ffmpeg pair offline. A wrapper replaces
 // only extraction with fixed metadata; yt-dlp downloads two HTTP streams,
@@ -43,17 +82,25 @@ func TestRealVideoMerge(t *testing.T) {
 	if err := os.WriteFile(info, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	// Arguments are passed verbatim using Python's execv; no shell interpolation
-	// of media URLs, cookies, or output templates is involved.
-	python, err := exec.LookPath("python3")
+	// Copy this native test executable so Windows does not need shebang or
+	// shell emulation. init dispatches arguments before Go's test flag parser.
+	name := "yt-dlp-real-fixture"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	wrapper := filepath.Join(dir, name)
+	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrapper := filepath.Join(dir, "yt-dlp-test")
-	body := "#!" + python + "\nimport os,sys,subprocess\na=sys.argv[1:]\nif '--dump-single-json' in a:\n print(open(os.environ['WIRE_VIDEO_INFO_FILE']).read())\nelse:\n a=a[:a.index('--')]\n r=subprocess.run([os.environ['WIRE_REAL_YTDLP'],*a,'--load-info-json',os.environ['WIRE_VIDEO_INFO_FILE']],stderr=subprocess.PIPE)\n open(os.environ['WIRE_TEST_ERROR_LOG'],'wb').write(r.stderr)\n sys.stderr.buffer.write(r.stderr)\n sys.exit(r.returncode)\n"
-	if err = os.WriteFile(wrapper, []byte(body), 0700); err != nil {
+	binary, err := os.ReadFile(executable)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if err = os.WriteFile(wrapper, binary, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WIRE_REAL_VIDEO_HELPER", "1")
 	t.Setenv("WIRE_VIDEO_INFO_FILE", info)
 	t.Setenv("WIRE_REAL_YTDLP", yt)
 	t.Setenv("WIRE_TEST_ERROR_LOG", filepath.Join(dir, "stderr.log"))

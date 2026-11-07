@@ -1,7 +1,7 @@
 package config
 
 import (
-	"os"
+	"github.com/k0ngk0ng/wire-tools/components/download/internal/private"
 	"path/filepath"
 	"testing"
 )
@@ -15,9 +15,8 @@ func TestInitPrivateAndNonDestructive(t *testing.T) {
 	if c.Secret == "" {
 		t.Fatal("missing secret")
 	}
-	st, err := os.Stat(filepath.Join(dir, "config.json"))
-	if err != nil || st.Mode().Perm() != 0600 {
-		t.Fatal(st, err)
+	if err := private.Check(filepath.Join(dir, "config.json")); err != nil {
+		t.Fatal(err)
 	}
 	if _, err = Init(dir, "ignored"); err == nil {
 		t.Fatal("existing config overwritten")

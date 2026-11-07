@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/k0ngk0ng/wire-tools/components/download/internal/private"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"unicode"
@@ -40,7 +42,7 @@ type Config struct {
 }
 
 func Init(dir, downloads string) (Config, error) {
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := private.Dir(dir); err != nil {
 		return Config{}, err
 	}
 	if _, err := os.Stat(filepath.Join(dir, "config.json")); err == nil {
@@ -67,7 +69,9 @@ func Init(dir, downloads string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	_, err = f.Write(data)
+	if err = private.File(f.Name()); err == nil {
+		_, err = f.Write(data)
+	}
 	closeErr := f.Close()
 	if err != nil {
 		return Config{}, err
@@ -77,7 +81,11 @@ func Init(dir, downloads string) (Config, error) {
 
 func Load(dir string) (Config, error) {
 	var c Config
-	b, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	path := filepath.Join(dir, "config.json")
+	if err := private.Check(path); err != nil {
+		return c, err
+	}
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return c, fmt.Errorf("read config (run wirectl download init first): %w", err)
 	}
@@ -111,22 +119,27 @@ func ResolveBinary(name string) string {
 	if filepath.Base(name) != name {
 		return name
 	}
+	candidates := []string{name}
+	if runtime.GOOS == "windows" && !strings.EqualFold(filepath.Ext(name), ".exe") {
+		candidates = []string{name + ".exe", name}
+	}
+	roots := []string{}
 	if bundle := os.Getenv("WIRECTL_BUNDLE_DIR"); bundle != "" {
-		bundled := filepath.Join(bundle, "libexec", "wirectl-download", "bin", name)
-		if st, err := os.Stat(bundled); err == nil && st.Mode().IsRegular() {
-			return bundled
+		roots = append(roots, bundle)
+	}
+	if self, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(self); err == nil {
+			self = resolved
 		}
+		roots = append(roots, filepath.Join(filepath.Dir(self), ".."))
 	}
-	self, err := os.Executable()
-	if err != nil {
-		return name
-	}
-	if resolved, err := filepath.EvalSymlinks(self); err == nil {
-		self = resolved
-	}
-	bundled := filepath.Join(filepath.Dir(self), "..", "libexec", "wirectl-download", "bin", name)
-	if st, err := os.Stat(bundled); err == nil && st.Mode().IsRegular() && st.Mode()&0111 != 0 {
-		return filepath.Clean(bundled)
+	for _, root := range roots {
+		for _, candidate := range candidates {
+			bundled := filepath.Join(root, "libexec", "wirectl-download", "bin", candidate)
+			if st, err := os.Stat(bundled); err == nil && st.Mode().IsRegular() && (runtime.GOOS == "windows" || st.Mode()&0111 != 0) {
+				return filepath.Clean(bundled)
+			}
+		}
 	}
 	return name
 }

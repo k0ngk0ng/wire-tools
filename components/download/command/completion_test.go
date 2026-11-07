@@ -1,10 +1,12 @@
 package command
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -60,10 +62,7 @@ func TestCompletionScriptsParse(t *testing.T) {
 	for _, shell := range []string{"bash", "zsh", "fish"} {
 		shell := shell
 		t.Run(shell, func(t *testing.T) {
-			shellPath, err := exec.LookPath(shell)
-			if err != nil {
-				t.Skipf("%s is not installed", shell)
-			}
+			shellPath := completionShell(t, shell)
 			output, err := completionScript(shell)
 			if err != nil {
 				t.Fatal(err)
@@ -93,10 +92,13 @@ func runBashCompletion(t *testing.T, words []string, current int) []string {
 	}
 	quoted := make([]string, len(words))
 	for i, word := range words {
-		quoted[i] = shellQuote(word)
+		quoted[i] = shellQuote(bashFilePath(word))
 	}
 	program := script + "\nCOMP_WORDS=(" + strings.Join(quoted, " ") + ")\nCOMP_CWORD=" + strconv.Itoa(current) + "\n_wirectl_download_completion\nprintf '%s\\n' \"${COMPREPLY[@]}\"\n"
-	cmd := exec.Command("bash", "-c", program)
+	// Feed source through stdin: Windows CreateProcess quoting must not carry
+	// a complete shell program as one command-line argument.
+	cmd := exec.Command(completionShell(t, "bash"), "--noprofile", "--norc")
+	cmd.Stdin = strings.NewReader(program)
 	data, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("bash completion: %v\n%s", err, data)
@@ -118,9 +120,7 @@ func containsCompletion(values []string, want string) bool {
 }
 
 func TestBashCompletionContexts(t *testing.T) {
-	if _, err := exec.LookPath("bash"); err != nil {
-		t.Skip("bash is not installed")
-	}
+	completionShell(t, "bash")
 	tests := []struct {
 		name  string
 		words []string
@@ -152,16 +152,14 @@ func TestBashCompletionContexts(t *testing.T) {
 		}
 		prefix := filepath.Join(dir, "fixture ")
 		values := runBashCompletion(t, []string{"wirectl-download", "add", prefix}, 2)
-		if !containsCompletion(values, path) {
+		if !containsCompletion(values, bashFilePath(path)) {
 			t.Fatalf("completion=%q, want %q", values, path)
 		}
 	})
 }
 
 func TestBashDirectoryCompletion(t *testing.T) {
-	if _, err := exec.LookPath("bash"); err != nil {
-		t.Skip("bash is not installed")
-	}
+	completionShell(t, "bash")
 	dir := t.TempDir()
 	path := filepath.Join(dir, "completion-test")
 	if err := os.Mkdir(path, 0700); err != nil {
@@ -169,7 +167,47 @@ func TestBashDirectoryCompletion(t *testing.T) {
 	}
 	prefix := filepath.Join(dir, "completion-")
 	values := runBashCompletion(t, []string{"wirectl-download", "--data-dir", prefix}, 2)
-	if !containsCompletion(values, path) {
+	if !containsCompletion(values, bashFilePath(path)) {
 		t.Fatalf("directory completion=%q, want %q", values, path)
 	}
+}
+
+// Git Bash is a native Windows executable; PATH's bash may instead be WSL.
+func completionShell(t *testing.T, shell string) string {
+	t.Helper()
+	if runtime.GOOS != "windows" || shell != "bash" {
+		p, err := exec.LookPath(shell)
+		if err != nil {
+			t.Skipf("%s is not installed", shell)
+		}
+		return p
+	}
+	var candidates []string
+	for _, base := range []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)"), filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs")} {
+		if base != "" {
+			candidates = append(candidates, filepath.Join(base, "Git", "bin", "bash.exe"), filepath.Join(base, "Git", "usr", "bin", "bash.exe"))
+		}
+	}
+	if git, err := exec.LookPath("git"); err == nil {
+		root := filepath.Dir(filepath.Dir(git))
+		candidates = append(candidates, filepath.Join(root, "bin", "bash.exe"), filepath.Join(root, "usr", "bin", "bash.exe"))
+	}
+	for _, candidate := range candidates {
+		output, err := exec.Command(candidate, "--version").CombinedOutput()
+		if err == nil && strings.Contains(string(output), "GNU bash") {
+			return candidate
+		}
+	}
+	t.Skip("native Git Bash is not installed")
+	return ""
+}
+func bashFilePath(value string) string {
+	if runtime.GOOS != "windows" || !filepath.IsAbs(value) {
+		return value
+	}
+	path := filepath.ToSlash(value)
+	if len(path) >= 3 && path[1] == ':' && path[2] == '/' {
+		return fmt.Sprintf("/%s/%s", strings.ToLower(path[:1]), path[3:])
+	}
+	return path
 }

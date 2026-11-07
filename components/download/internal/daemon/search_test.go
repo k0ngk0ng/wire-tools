@@ -3,9 +3,9 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"github.com/k0ngk0ng/wire-tools/components/download/internal/private"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -108,8 +108,7 @@ func TestSearchRoutesProgressDownloadAndSources(t *testing.T) {
 	if len(loaded) != 2 || loaded[1].Enabled || loaded[1].APIKey != "private-test-key" {
 		t.Fatal("toggle lost key or not persisted")
 	}
-	info, err := os.Stat(filepath.Join(dir, "search-sources.json"))
-	if err != nil || info.Mode().Perm() != 0600 {
+	if err := private.Check(filepath.Join(dir, "search-sources.json")); err != nil {
 		t.Fatal("source config permissions", err)
 	}
 	w = request("DELETE", "/v1/search-sources/private", "")

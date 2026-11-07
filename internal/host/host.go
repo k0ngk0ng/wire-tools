@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/k0ngk0ng/wire-tools/api"
@@ -70,13 +71,25 @@ func Run(ctx context.Context, home, version string) error {
 	conn := connect.New(ctx, filepath.Join(home, "connect"), version)
 	down := download.New(ctx, filepath.Join(home, "download"), version)
 	voice := talk.New(ctx, filepath.Join(home, "talk"), version)
-	defer conn.Close()
-	defer down.Close()
-	defer voice.Close()
+	var closeOnce sync.Once
+	closeResources := func() {
+		closeOnce.Do(func() {
+			for _, resource := range []struct {
+				name  string
+				close func() error
+			}{{"talk", voice.Close}, {"download", down.Close}, {"connect", conn.Close}} {
+				if err := resource.close(); err != nil {
+					fmt.Fprintln(os.Stderr, resource.name, "shutdown:", err)
+				}
+			}
+		})
+	}
+	defer closeResources()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		JSON(w, 200, map[string]any{"version": version, "pid": os.Getpid(), "api_version": "v1", "features": []string{"connect", "download", "talk"}})
 	})
+	mux.HandleFunc("POST /v1/update", UpdateHandler(cancel))
 	mux.HandleFunc("POST /v1/runtime/shutdown", func(w http.ResponseWriter, r *http.Request) {
 		JSON(w, 202, map[string]bool{"stopping": true})
 		go cancel()
@@ -118,6 +131,9 @@ func Run(ctx context.Context, home, version string) error {
 			return err
 		}
 	}
+	// Keep health discovery alive while owned engines flush and exit. Their
+	// watchdogs must not mistake orderly resource teardown for an API crash.
+	closeResources()
 	shutdown, stop := context.WithTimeout(context.Background(), 15*time.Second)
 	defer stop()
 	if err := server.Shutdown(shutdown); err != nil {

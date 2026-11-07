@@ -233,6 +233,14 @@ func (m *Managed) Close() error {
 		m.cancel()
 		<-m.done
 		m.searches.manager.Close()
+		// Observe terminal engine state before native Close saves sessions and
+		// shuts down RPC. The final refresh below also captures HTTP workers
+		// finishing cancellation while their private journal is flushed.
+		snapshot, cancelSnapshot := context.WithTimeout(context.Background(), 3*time.Second)
+		if err := m.Store.Refresh(snapshot); err != nil && m.closeErr == nil {
+			m.closeErr = err
+		}
+		cancelSnapshot()
 		for _, b := range m.backends {
 			if err := b.Close(); err != nil && m.closeErr == nil {
 				m.closeErr = err

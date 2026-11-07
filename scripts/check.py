@@ -58,6 +58,7 @@ def main():
     run('download-e2e',[sys.executable,'tests/e2e/test_download_api.py'])
     run('talk-e2e',[sys.executable,'tests/e2e/test_talk_api.py'])
     run('update-e2e',[sys.executable,'tests/e2e/test_update.py'])
+    run('connect-cli-e2e',[sys.executable,'tests/e2e/test_connect_cli.py'])
     run('terminal-e2e',[sys.executable,'tests/e2e/test_terminal.py'])
     run('package-e2e',[sys.executable,'scripts/test-package.py'])
 

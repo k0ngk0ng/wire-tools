@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/k0ngk0ng/wire-tools/components/download/internal/private"
 	"io"
 	"net/url"
 	"os"
@@ -215,9 +216,15 @@ func LoadSources(dir string) ([]SourceConfig, error) {
 	}
 	// Existing installations may have been created before source credentials
 	// were supported.  Tighten their mode on read before parsing secrets.
-	if info.Mode().Perm() != 0600 {
-		if err := os.Chmod(path, 0600); err != nil {
+	if err := private.Check(path); err != nil {
+		if runtime.GOOS == "windows" {
+			return nil, fmt.Errorf("search source configuration is not private: %w", err)
+		}
+		if err = private.File(path); err != nil {
 			return nil, fmt.Errorf("secure search source configuration: %w", err)
+		}
+		if err = private.Check(path); err != nil {
+			return nil, err
 		}
 	}
 	f, err := os.Open(path)
@@ -254,7 +261,7 @@ func SaveSources(dir string, sources []SourceConfig) error {
 	if err := validateSources(sources); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := private.Dir(dir); err != nil {
 		return fmt.Errorf("create search source directory: %w", err)
 	}
 	if info, err := os.Stat(dir); err != nil {
@@ -274,7 +281,7 @@ func SaveSources(dir string, sources []SourceConfig) error {
 			_ = os.Remove(tmp)
 		}
 	}()
-	if err := f.Chmod(0600); err != nil {
+	if err := private.File(f.Name()); err != nil {
 		return fmt.Errorf("secure search source temporary file: %w", err)
 	}
 	enc := json.NewEncoder(f)

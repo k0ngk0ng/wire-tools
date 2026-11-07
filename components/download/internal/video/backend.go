@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/k0ngk0ng/wire-tools/components/download/internal/private"
 	"io"
 	"os"
 	"os/exec"
@@ -65,7 +66,7 @@ func (b *Backend) command(ctx context.Context, source string, args ...string) (*
 		return nil, nil, err
 	}
 	tmp := filepath.Join(b.opts.StateDir, "video", "tmp")
-	if err := os.MkdirAll(tmp, 0700); err != nil {
+	if err := private.Dir(tmp); err != nil {
 		return nil, nil, err
 	}
 	base := []string{"--ignore-config", "--no-cache-dir", "--no-colors", "--socket-timeout", "20", "--retries", "3", "--fragment-retries", "3", "--no-remote-components", "--js-runtimes", "deno:" + b.opts.Deno, "--ffmpeg-location", b.opts.FFmpeg}
@@ -87,6 +88,11 @@ func (b *Backend) command(ctx context.Context, source string, args ...string) (*
 			return nil, nil, err
 		}
 		cleanup = func() { _ = os.Remove(f.Name()) }
+		if err = private.File(f.Name()); err != nil {
+			f.Close()
+			cleanup()
+			return nil, nil, err
+		}
 		var data strings.Builder
 		data.WriteString("# Netscape HTTP Cookie File\n")
 		for _, c := range session.Cookies {

@@ -103,6 +103,17 @@ class UpdateProcesses(unittest.TestCase):
         self.assertEqual(new['version'],NEW_VERSION)
         self.assertNotEqual(old['pid'],new['pid'])
 
+    def test_direct_api_update_uses_same_installation_transaction(self):
+        self.cli('api','status','--json')
+        ep=json.loads((self.path/'state/api.json').read_text())
+        body=json.dumps({'archive':str(self.archive),'checksums':str(self.dist/'SHA256SUMS')}).encode()
+        req=urllib.request.Request('http://'+ep['address']+'/v1/update',data=body,method='POST',
+            headers={'Authorization':'Bearer '+ep['token'],'Content-Type':'application/json'})
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req,timeout=60) as response:
+            result=json.load(response)
+        self.assertEqual(result['version'],NEW_VERSION)
+        self.assertEqual(self.cli('version').stdout.strip(),NEW_VERSION)
+
     def test_checksums_do_not_allow_path_traversal(self):
         archive=self.path/self.archive.name
         if archive.suffix=='.zip':
