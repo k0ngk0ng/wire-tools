@@ -133,6 +133,15 @@ func parseDarwinRoutePrefixes(data []byte) ([]netip.Prefix, error) {
 			return nil, err
 		}
 		if !skip {
+			if len(fields) > 2 && prefix.Bits() == 32 {
+				flags := fields[2]
+				// LLINFO (L) and WASCLONED (W) host entries are neighbor
+				// caches, not reserved networks. Preserve explicit static (S)
+				// routes and all network/TUN routes when checking overlaps.
+				if strings.Contains(flags, "H") && strings.ContainsAny(flags, "LW") && !strings.Contains(flags, "S") {
+					continue
+				}
+			}
 			routes = append(routes, prefix)
 		}
 	}

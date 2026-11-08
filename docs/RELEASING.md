@@ -43,7 +43,7 @@ python3 scripts/test-installed.py ./dist/wirectl-1.0.0-darwin-arm64.tar.gz
 
 发布完成后，工作流用当前仓库的 `GITHUB_TOKEN` 把 `Formula/wirectl.rb` 和 `bucket/wirectl.json` 提交到默认分支。仓库需要允许 Actions 写入内容；默认分支保护规则也需允许该提交。若分支保护拒绝提交，已发布的归档和包定义资产仍可使用，将工作流生成的两个定义通过 PR 合入即可。无需跨仓库个人令牌，也不再依赖旧包仓库的定时同步。
 
-首次统一正式版本发布前，没有可用的稳定统一 Scoop Manifest。Homebrew 可先使用源码入口：
+Homebrew 也提供开发源码入口：
 
 ```sh
 brew tap k0ngk0ng/wire-tools https://github.com/k0ngk0ng/wire-tools
@@ -54,7 +54,7 @@ HEAD 入口构建 Go 程序，完整原生下载引擎由正式分发包提供�
 
 ## 安装与更新
 
-首个统一正式版本发布且包定义合入后：
+macOS 和 Linux 使用 Homebrew：
 
 ```sh
 brew tap k0ngk0ng/wire-tools https://github.com/k0ngk0ng/wire-tools

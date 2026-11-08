@@ -44,9 +44,9 @@ Connect 需要自行部署公网会合及中继服务器，并完成服务器授
 
 支持 macOS arm64、Linux amd64/arm64、Windows amd64。各平台共用同一工具和 API。Talk 使用原生音频后端；Connect 的网络 helper 仍遵守操作系统的权限边界。Unix 完整发布包包含 aria2、aMule、yt-dlp、ffmpeg 和 deno。Windows 包包含 Wintun；内置 HTTP(S) 下载可直接使用，其他下载协议需要可用的对应引擎，当前发布工作流不打包 Windows 版 aria2/aMule/视频工具。
 
-首个统一正式版本发布后，可从 [Releases](https://github.com/k0ngk0ng/wire-tools/releases) 获取对应平台归档，核对 `SHA256SUMS` 后解压完整安装树。`bin/wirectl` 需要和包内的运行依赖一起保留。构建来源可使用 `gh attestation verify <archive> --repo k0ngk0ng/wire-tools` 验证。
+可从 [Releases](https://github.com/k0ngk0ng/wire-tools/releases) 获取对应平台归档，核对 `SHA256SUMS` 后解压完整安装树。`bin/wirectl` 需要和包内的运行依赖一起保留。构建来源可使用 `gh attestation verify <archive> --repo k0ngk0ng/wire-tools` 验证。
 
-Homebrew 和 Scoop 的包定义也维护在此仓库，首个正式版本会由发布工作流生成实际 URL 和校验值。安装命令及首版前的源码安装方式见 [发布与安装](docs/RELEASING.md)。现有的 `wire-connect`、`wire-download`、`wire-talk`、`wirectl`、`scoop-bucket` 和 `homebrew-tap` 仓库均保留，不会自动重命名、归档或删除。
+Homebrew 和 Scoop 的包定义也维护在此仓库，由同一发布工作流生成实际 URL 和校验值。安装命令见 [发布与安装](docs/RELEASING.md)。原 `wire-connect`、`wire-download`、`wire-talk`、`wirectl`、`scoop-bucket` 和 `homebrew-tap` 仓库保留历史版本，后续开发与发布集中在此。独立产品 `sactl` 的包定义与发布流程维护在 [stoneage](https://github.com/k0ngk0ng/stoneage) 仓库。
 
 ## 本地 API
 
