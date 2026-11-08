@@ -252,8 +252,15 @@ func (c *Client) open(ctx context.Context, ep Endpoint, method, path string, bod
 	h := &http.Client{Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return h.Do(req)
 }
+func boundedRequestContext(ctx context.Context, method, path string) (context.Context, context.CancelFunc) {
+	budget := 5 * time.Minute
+	if method == http.MethodPost && path == "/v1/update" {
+		budget = 30 * time.Minute
+	}
+	return context.WithTimeout(ctx, budget)
+}
 func (c *Client) do(ctx context.Context, ep Endpoint, method, path string, body []byte) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	ctx, cancel := boundedRequestContext(ctx, method, path)
 	defer cancel()
 	resp, err := c.open(ctx, ep, method, path, body)
 	if err != nil {

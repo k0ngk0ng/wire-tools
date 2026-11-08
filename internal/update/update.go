@@ -40,6 +40,9 @@ type Result struct {
 	PackageManager string
 }
 type asset struct {
+	ID     int64  `json:"id"`
+	Size   int64  `json:"size"`
+	APIURL string `json:"url"`
 	Name   string `json:"name"`
 	URL    string `json:"browser_download_url"`
 	Digest string `json:"digest"`
@@ -85,22 +88,33 @@ func Run(ctx context.Context, o Options) (Result, error) {
 			return Result{}, errors.New("version and offline overrides are unavailable for package-managed installations")
 		}
 		manager := strings.TrimSpace(string(marker))
-		var cmd *exec.Cmd
+		var commands []*exec.Cmd
 		switch manager {
 		case "homebrew":
-			cmd = exec.CommandContext(ctx, "brew", "upgrade", "k0ngk0ng/wire-tools/wirectl")
+			commands = []*exec.Cmd{
+				exec.CommandContext(ctx, "brew", "update"),
+				exec.CommandContext(ctx, "brew", "upgrade", "k0ngk0ng/wire-tools/wirectl"),
+			}
 		case "scoop":
 			if runtime.GOOS == "windows" {
-				cmd = exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "& scoop update wirectl; if (-not $?) { exit 1 }; exit 0")
+				commands = []*exec.Cmd{
+					exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "$ErrorActionPreference = 'Stop'; & scoop update; if (-not $?) { exit 1 }; exit 0"),
+					exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "$ErrorActionPreference = 'Stop'; & scoop update wirectl; if (-not $?) { exit 1 }; exit 0"),
+				}
 			} else {
-				cmd = exec.CommandContext(ctx, "scoop", "update", "wirectl")
+				commands = []*exec.Cmd{
+					exec.CommandContext(ctx, "scoop", "update"),
+					exec.CommandContext(ctx, "scoop", "update", "wirectl"),
+				}
 			}
 		default:
 			return Result{}, errors.New("unrecognized package manager marker")
 		}
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-		if err := cmd.Run(); err != nil {
-			return Result{}, err
+		for _, cmd := range commands {
+			cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+			if err := cmd.Run(); err != nil {
+				return Result{}, err
+			}
 		}
 		return Result{Version: "latest", PackageManager: manager}, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -169,6 +183,9 @@ func Run(ctx context.Context, o Options) (Result, error) {
 			if count != 1 || found.URL != "https://github.com/"+repository+"/releases/download/"+rel.Tag+"/"+want {
 				return found, errors.New("unexpected or duplicate GitHub release asset")
 			}
+			if found.ID <= 0 || found.APIURL != fmt.Sprintf("https://api.github.com/repos/%s/releases/assets/%d", repository, found.ID) {
+				return found, errors.New("invalid GitHub release asset REST URL or ID")
+			}
 			return found, nil
 		}
 		a, err := lookup(name)
@@ -179,14 +196,14 @@ func Run(ctx context.Context, o Options) (Result, error) {
 		if err != nil {
 			return Result{}, err
 		}
-		data, err = fetch(ctx, a.URL, archiveLimit)
+		data, err = downloadArchive(ctx, a)
 		if err != nil {
 			return Result{}, err
 		}
 		if err = verifyDigest(data, a.Digest); err != nil {
 			return Result{}, err
 		}
-		sums, err = fetch(ctx, s.URL, 2<<20)
+		sums, err = fetchAsset(ctx, s.APIURL, 2<<20)
 		if err != nil {
 			return Result{}, err
 		}
@@ -306,6 +323,12 @@ func allowed(u *url.URL) bool {
 	return false
 }
 func fetch(ctx context.Context, address string, limit int64) ([]byte, error) {
+	return fetchWithAccept(ctx, address, limit, "application/vnd.github+json")
+}
+func fetchAsset(ctx context.Context, address string, limit int64) ([]byte, error) {
+	return fetchWithAccept(ctx, address, limit, "application/octet-stream")
+}
+func fetchWithAccept(ctx context.Context, address string, limit int64, accept string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", address, nil)
 	if err != nil {
 		return nil, err
@@ -314,21 +337,34 @@ func fetch(ctx context.Context, address string, limit int64) ([]byte, error) {
 		return nil, errors.New("untrusted update URL")
 	}
 	req.Header.Set("User-Agent", "wirectl-updater")
-	client := &http.Client{Timeout: 5 * time.Minute, CheckRedirect: func(r *http.Request, via []*http.Request) error {
-		if len(via) > 5 || !allowed(r.URL) {
-			return errors.New("untrusted update redirect")
-		}
-		return nil
-	}}
+	req.Header.Set("Accept", accept)
+	client := &http.Client{Timeout: 5 * time.Minute, CheckRedirect: updateRedirect}
+	assetRequest := accept == "application/octet-stream"
+	if assetRequest {
+		client = newAssetClient(5 * time.Minute)
+		defer closeAssetClient(client)
+		req.Header.Set("Accept-Encoding", "identity")
+		req.Header.Set("Cache-Control", "no-cache")
+	}
 	resp, err := client.Do(req)
 	if err != nil {
+		if assetRequest {
+			return nil, safeAssetError(err)
+		}
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
+		if assetRequest {
+			return nil, fmt.Errorf("release asset HTTP %d", resp.StatusCode)
+		}
 		return nil, fmt.Errorf("GitHub release: %s", resp.Status)
 	}
-	return bounded(resp.Body, limit)
+	data, err := bounded(resp.Body, limit)
+	if assetRequest && err != nil {
+		return nil, safeAssetError(err)
+	}
+	return data, err
 }
 func digest(b []byte) string { sum := sha256.Sum256(b); return hex.EncodeToString(sum[:]) }
 func verifyDigest(data []byte, expected string) error {

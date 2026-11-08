@@ -139,12 +139,40 @@ class UpdateProcesses(unittest.TestCase):
         tools.mkdir()
         log=self.path/'scoop-call.json'
         script=tools/'scoop.ps1'
-        script.write_text('$args | ConvertTo-Json -Compress | Set-Content -Path $env:WIRECTL_MANAGER_LOG\nexit 0\n')
+        script.write_text('[System.IO.File]::AppendAllText($env:WIRECTL_MANAGER_LOG, (ConvertTo-Json -InputObject @($args) -Compress) + "`n")\nexit 0\n')
         (self.binary.parent/'.wirectl-package-manager').write_text('scoop\n')
         self.env['PATH']=str(tools)+os.pathsep+self.env.get('PATH','')
         self.env['WIRECTL_MANAGER_LOG']=str(log)
         self.cli('update')
-        self.assertEqual(json.loads(log.read_text(encoding='utf-8-sig')),['update','wirectl'])
+        self.assertEqual([json.loads(line) for line in log.read_text(encoding='utf-8-sig').splitlines()],[['update'],['update','wirectl']])
+        self.unchanged()
+
+    @unittest.skipUnless(os.name=='nt','Windows Scoop refresh failure')
+    def test_windows_scoop_refresh_failure_prevents_app_update(self):
+        tools=self.path/'tools';tools.mkdir()
+        log=self.path/'scoop-calls.jsonl'
+        (tools/'scoop.ps1').write_text('[System.IO.File]::AppendAllText($env:WIRECTL_MANAGER_LOG, (ConvertTo-Json -InputObject @($args) -Compress) + "`n")\nif ($args.Count -eq 1) { exit 23 }\nexit 0\n')
+        (self.binary.parent/'.wirectl-package-manager').write_text('scoop\n')
+        self.env['PATH']=str(tools)+os.pathsep+self.env.get('PATH','')
+        self.env['WIRECTL_MANAGER_LOG']=str(log)
+        result=self.cli('update',ok=False)
+        self.assertNotEqual(result.returncode,0)
+        self.assertEqual([json.loads(line) for line in log.read_text(encoding='utf-8-sig').splitlines()],[['update']])
+        self.unchanged()
+
+    @unittest.skipIf(os.name=='nt','package manager fixture uses a POSIX executable')
+    def test_brew_refresh_failure_prevents_app_upgrade(self):
+        tools=self.path/'tools';tools.mkdir()
+        log=self.path/'brew-calls.jsonl'
+        program=tools/'brew'
+        program.write_text('#!/usr/bin/env python3\nimport json,os,sys\nopen(os.environ["WIRECTL_MANAGER_LOG"],"a").write(json.dumps(sys.argv[1:])+"\\n")\nsys.exit(23 if sys.argv[1:]==["update"] else 0)\n')
+        program.chmod(0o755)
+        (self.binary.parent/'.wirectl-package-manager').write_text('homebrew\n')
+        self.env['PATH']=str(tools)+os.pathsep+self.env.get('PATH','')
+        self.env['WIRECTL_MANAGER_LOG']=str(log)
+        result=self.cli('update',ok=False)
+        self.assertNotEqual(result.returncode,0)
+        self.assertEqual([json.loads(line) for line in log.read_text().splitlines()],[['update']])
         self.unchanged()
 
     @unittest.skipIf(os.name=='nt','package manager fixture uses a POSIX executable')
@@ -154,13 +182,13 @@ class UpdateProcesses(unittest.TestCase):
         log=self.path/'package-manager-call.json'
         brew=manager/'brew'
         # No shell expands user data: the fixture receives its log path through environment.
-        brew.write_text('#!/usr/bin/env python3\nimport json,os,sys\nopen(os.environ["WIRECTL_MANAGER_LOG"],"w").write(json.dumps(sys.argv[1:]))\n')
+        brew.write_text('#!/usr/bin/env python3\nimport json,os,sys\nopen(os.environ["WIRECTL_MANAGER_LOG"],"a").write(json.dumps(sys.argv[1:])+"\\n")\n')
         brew.chmod(0o755)
         (self.binary.parent/'.wirectl-package-manager').write_text('homebrew\n')
         self.env['PATH']=str(manager)+os.pathsep+self.env.get('PATH','')
         self.env['WIRECTL_MANAGER_LOG']=str(log)
         self.cli('update')
-        self.assertEqual(json.loads(log.read_text()),['upgrade','k0ngk0ng/wire-tools/wirectl'])
+        self.assertEqual([json.loads(line) for line in log.read_text().splitlines()],[['update'],['upgrade','k0ngk0ng/wire-tools/wirectl']])
         self.unchanged()
 
 if __name__=='__main__':

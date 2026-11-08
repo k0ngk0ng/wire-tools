@@ -24,3 +24,11 @@
 ## 证据
 
 运行 `make check`。Go 检查日志和 E2E JSON 报告保存在 `.cache/evidence/`，CI 上传相同产物。E2E 使用真实 CLI 子进程、本地 HTTP 传输、真实磁盘文件和独立状态目录；语音 E2E 使用明确标记的测试音频驱动，不代表实机麦克风或公网 NAT 验证。
+
+## 在线更新 REST 资产入口回归
+
+1.0.2 实机出现 browser download URL 的 `unexpected EOF`，同一资产的官方 REST API 可正常重定向下载。新增实现前先覆盖：资产 id 缺失、0、负数；REST URL 缺失、异仓库、id 不匹配、query 或 HTTP；browser URL/tag/name 漂移与重复；未使用 `application/octet-stream`；不可信重定向；归档 GitHub 摘要、校验文件 GitHub 摘要、独立归档校验任一失败。测试使用真实归档和安装事务，模拟 browser 入口 EOF 与官方 REST 302；失败不得改写安装。
+
+大包分段回归在新增实现前覆盖：缺失或超限的资产 size，probe/每片 total 不符，无效、重复、越界的 Content-Range，截断或超长片段，分片意外返回 200，内容重复导致最终摘要失败，不可信重定向，调用方取消，signed query 错误脱敏。使用受信测试证书的真实 TLS/HTTP 服务测量最多 8 个独立 HTTP/1.1 TCP，并验证一次 REST 探测后复用官方 CDN URL；probe 返回 200 时验证有界单流 fallback。仅 archive 总预算 20 分钟、POST `/v1/update` 30 分钟，其他资源 5 分钟且保留调用方更短 deadline。
+
+签名链接过期回归先覆盖 8 个并发 401/403/618 合并为一次刷新、持续过期最多 4 次刷新、刷新 probe 的 total 异常不得继续下载。刷新只经原资产 REST URL，必须重新获得同 size 的合法 206；signed query 不进入错误或日志，包括 transport 错误与 HTTP status 文本。最终仍由完整归档的 GitHub 摘要和独立校验决定是否安装。
