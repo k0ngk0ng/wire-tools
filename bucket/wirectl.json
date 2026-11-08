@@ -1,12 +1,12 @@
 {
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Local APIs and CLI for encrypted connections, downloads and voice",
   "homepage": "https://github.com/k0ngk0ng/wire-tools",
   "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/k0ngk0ng/wire-tools/releases/download/v1.0.3/wirectl-1.0.3-windows-amd64.zip",
-      "hash": "76743c1850f81cd910f6adabd223dce95b3cd3def1fd8d6654d975df0cdbfabc"
+      "url": "https://github.com/k0ngk0ng/wire-tools/releases/download/v1.0.4/wirectl-1.0.4-windows-amd64.zip",
+      "hash": "ad9efef738f1196675c2cc496f9d8bc50cf262c7b08a10bb6bba3fd6c477591e"
     }
   },
   "bin": "bin/wirectl.exe",

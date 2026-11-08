@@ -2,22 +2,22 @@
 class Wirectl < Formula
   desc "Local APIs and CLI for encrypted connections, downloads and voice"
   homepage "https://github.com/k0ngk0ng/wire-tools"
-  version "1.0.3"
+  version "1.0.4"
   license all_of: ["MIT", "GPL-2.0-or-later", "LGPL-2.1-or-later"]
 
   on_macos do
     depends_on arch: :arm64
-    url "https://github.com/k0ngk0ng/wire-tools/releases/download/v1.0.3/wirectl-1.0.3-darwin-arm64.tar.gz"
-    sha256 "4773516bdbb715cd014754be8ace460fbd1eed95bb9bc0289df5b878eabf33b9"
+    url "https://github.com/k0ngk0ng/wire-tools/releases/download/v1.0.4/wirectl-1.0.4-darwin-arm64.tar.gz"
+    sha256 "39f669079b56a9b90535cc7b044749bb27f54f4fddb409ce3ceac41b22167568"
   end
   on_linux do
     on_arm do
-      url "https://github.com/k0ngk0ng/wire-tools/releases/download/v1.0.3/wirectl-1.0.3-linux-arm64.tar.gz"
-      sha256 "283b1f98607fe4c6834f95e98e2d282dc13df47ba9d1640604bce981a8d7dec8"
+      url "https://github.com/k0ngk0ng/wire-tools/releases/download/v1.0.4/wirectl-1.0.4-linux-arm64.tar.gz"
+      sha256 "57324e36f4c2312253df302bb26d1f8ecbadf9476262ef58223d331906dfcd21"
     end
     on_intel do
-      url "https://github.com/k0ngk0ng/wire-tools/releases/download/v1.0.3/wirectl-1.0.3-linux-amd64.tar.gz"
-      sha256 "e1929ec834059a047eef168c2d6624b521561648a75ca8669dedab17be655efd"
+      url "https://github.com/k0ngk0ng/wire-tools/releases/download/v1.0.4/wirectl-1.0.4-linux-amd64.tar.gz"
+      sha256 "608e5c65e739be80bb7187ff0a748ed76ca5ec37c236b445529af0b54c95db6a"
     end
   end
 
