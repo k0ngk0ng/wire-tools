@@ -14,6 +14,26 @@ wirectl talk leave
 
 `--input none` 适用于无麦克风或只发送文件音频的机器。正常使用麦克风时省略该参数。`join` 连接后即可关闭终端；`leave` 断开本地语音会话，保留配置。`status` 只检查状态；`mute`、`call`、`group` 和 `media` 操作按需就绪。创建配置使用独占写入，重复执行 `init` 不会覆盖已有房间。
 
+Direct 模式可以将来电铃声与通话输出分开。先用 `wirectl talk devices` 查询设备 ID，再配置 USB 听筒的输入、输出，以及另一只 USB 扬声器的铃声输出：
+
+```sh
+wirectl talk init --mode direct --input HANDSET_INPUT_ID --output HANDSET_OUTPUT_ID --ring-output SPEAKER_ID
+```
+
+`pair` 和带地址的 `join` 也接受 `--ring-output`。同一个播放／暂停键在待机时拨号、来电时接听、通话中挂断；拨号中再按一次可取消。来电只在铃声扬声器播放；接听后，双方语音使用听筒的输入、输出，铃声扬声器保持安静。主动拨号时的回铃音仍在听筒播放。铃声设备掉线不会切换通话设备，也不会阻塞通话；`status --json` 的 `ring_output_device` 报告独立铃声设备的状态和电平。通话音量键只调整通话音量，`mute output` 同时静音通话和铃声。
+
+省略 `--ring-output` 或选择与通话相同的输出时，继续使用原有单输出方式。USB 播放／音量键由可选 `spacetouch` 插件负责，树莓派板卡按钮及数码管由 `sakshat` 插件负责。Talk 不再自动抢占 USB 按键设备；需要时执行 `wirectl plugin enable spacetouch` 或 `wirectl plugin enable sakshat`，详见[硬件插件](../../plugins/README.md)。
+
+Linux USB 设备 ID 使用 ALSA 声卡名称，声卡编号改变后仍能保持通话和铃声角色。旧编号 ID 保留兼容；已有配置可用 `devices set` 保存当前枚举出的稳定 ID。
+
+已有房间无需重新配对。先断开本地会话，再保存音频选择并重连；省略的选项保留原值，`--ring-output ''` 恢复共享输出：
+
+```sh
+wirectl talk leave
+wirectl talk devices set --input HANDSET_INPUT_ID --output HANDSET_OUTPUT_ID --ring-output SPEAKER_ID
+wirectl talk join
+```
+
 ## 资源
 
 以下路径相对于统一入口 `/v1/talk`。认证、监听地址和 endpoint 文件由根目录 API 管理。
@@ -21,7 +41,8 @@ wirectl talk leave
 | 方法 | 路径 | 行为 |
 |---|---|---|
 | GET | `/config` | 查询本机配置；不返回房间密钥 |
-| POST | `/config` | 创建配置，接受 `mode`、`listen`、`input`、`output`、`name`、`peers`、`headphones` |
+| POST | `/config` | 创建配置，接受 `mode`、`listen`、`input`、`output`、`ring_output`、`name`、`peers`、`headphones` |
+| PATCH | `/config` | 会话断开后修改本机 `input`、`output`、`ring_output`；只更新传入字段，保留房间和配对 |
 | POST | `/session` | 连接已保存房间；重复调用复用同一会话 |
 | DELETE | `/session` | 断开本地会话，保留配置 |
 | GET | `/status` | 查询状态、成员、设备、音量、电平和媒体状态；不会主动打开音频设备 |

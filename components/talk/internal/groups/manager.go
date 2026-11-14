@@ -75,6 +75,7 @@ type Manager struct {
 	rooms           map[string]*liveRoom
 	closed          bool
 	limiter         volume.Limiter
+	ringLimiter     volume.Limiter
 }
 
 func Open(ctx context.Context, dir string, c config.Config) (*Manager, error) {
@@ -134,27 +135,46 @@ func (m *Manager) Capture(p []byte) {
 	}
 }
 func (m *Manager) Playback(out []byte) {
+	m.PlaybackWithRinger(out, nil)
+}
+
+// PlaybackWithRinger drains media once and keeps incoming alerts out of voice
+// playback, encrypted audio and received-audio recordings.
+func (m *Manager) PlaybackWithRinger(out, ring []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	clear(out)
+	clear(ring)
 	if m.closed {
 		return
 	}
 	sums := [room.FrameSamples]float64{}
+	ringSums := [room.FrameSamples]float64{}
 	monitor := [room.FrameSamples]float64{}
+	ringTone := [room.FrameSamples]float64{}
 	frame := [room.FrameBytes]byte{}
 	for _, g := range m.cfg.RoomConfigs() {
 		l := m.rooms[g.ID()]
 		l.m.PlaybackMonitor(frame[:], monitor[:], g.PeerGains) // Drain even muted rooms; recordings remain independent.
-		l.r.CallTone(monitor[:])
+		clear(ringTone[:])
+		if ring == nil {
+			l.r.CallTone(monitor[:])
+		} else {
+			l.r.CallToneRouted(monitor[:], ringTone[:])
+		}
 		if g.Muted || !l.online.Load() {
 			continue
 		}
 		for i := range sums {
 			sums[i] += monitor[i]
+			ringSums[i] += ringTone[i]
 		}
 	}
 	m.limiter.Render(out, sums[:], volume.Factor(m.cfg.OutputGainDB))
+	if ring != nil {
+		// Handset volume controls do not change the incoming alert's gain.
+		m.ringLimiter.Render(ring, ringSums[:], 1)
+	}
 }
 func (m *Manager) Apply(cmd config.GroupChange) error {
 	m.mu.Lock()

@@ -84,6 +84,7 @@ func pairCommand(ctx context.Context, dir string, args []string) error {
 	fs.StringVar(&c.Listen, "listen", c.Listen, "local UDP listen address")
 	fs.StringVar(&c.Input, "input", "", "input device ID (default when empty)")
 	fs.StringVar(&c.Output, "output", "", "output device ID (default when empty)")
+	fs.StringVar(&c.RingOutput, "ring-output", "", "incoming ringtone output device ID (uses call output when empty)")
 	fs.BoolVar(&c.Headphones, "headphones", false, "legacy compatibility option; audio is always full duplex")
 	// Support both HOST:PORT --code CODE and --code CODE HOST:PORT.
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -93,7 +94,7 @@ func pairCommand(ctx context.Context, dir string, args []string) error {
 		return err
 	}
 	if fs.NArg() != 1 || *code == "" {
-		return errors.New("usage: pair|join HOST:PORT --code CODE [--input ID --output ID --headphones]")
+		return errors.New("usage: pair|join HOST:PORT --code CODE [--input ID --output ID --ring-output ID --headphones]")
 	}
 	address := fs.Arg(0)
 	remote, err := net.ResolveUDPAddr("udp", address)

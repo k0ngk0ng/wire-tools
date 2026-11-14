@@ -1,5 +1,23 @@
 # 验收记录
 
+## 独立铃声扬声器
+
+先新增统一进程 E2E，确认旧实现因不认识 `--ring-output` 和 `ring_output` 失败，再实现独立输出。`tests/e2e/test_talk_api.py` 使用真实 CLI、本地 API、TCP 配对和加密 UDP，覆盖来电铃声与听筒分离、播放键接听及挂断、重复／松开事件过滤、接听前不发送音频、铃声不进入收到音频的录音、双向通话、铃声设备掉线与重连、取消铃声、单输出兼容，以及同一设备共享输出。
+
+已有房间的 `devices set` 和 `PATCH /config` 也先确认旧实现失败，再实现仅在会话断开时修改本机输入、输出和铃声输出，覆盖部分字段更新、拒绝空变更及未知字段、保留房间密钥与成员、不自动重连。Linux 新增 `12d1:3a07` 型号，并通过先列失败场景、先写隔离测试的方式，将媒体键限制在所选 ALSA 通话设备所属的 USB 节点。
+
+执行 `make check` 可重复运行上述 E2E。结果在 `.cache/evidence/talk-process-e2e.json`，进程日志和 WAV 在 `.cache/e2e/talk-process/`，改动前失败记录在 `.cache/evidence/direct-ringer-before.*`、`.cache/evidence/devices-set-before.*`。音频驱动为 `talk_test_audio`，不代表两个真实 USB 设备的声音效果或实体按键已验收。
+
+远端 `10.250.0.7` 的 `SPACETOUCH USB Audio` 已完成设备枚举，用户确认听到原生播放测试提示音。后续回放期间发生重新插拔，ALSA 卡号变动；失败的固定卡号回放不能归因为新设备，也不构成完整通话验收。现场记录保存在 `.cache/evidence/remote-usb-handset/20261113/`。
+
+2026-11-13 最终 8 项语音进程 E2E 全部通过，Linux ARM64 听筒包完成交叉编译检查。两次串行 `make check` 的其他阶段通过，但全仓 Go 测试均在 `connect` 的 `TestPairedWireGuardOverHTTPSRelayAndDirect/relay_only_false`（客户端退出超时）与 `TestICEConsentLossUnblocksRead`（ICE 失效后读取未返回）失败；未将全仓检查报告为通过，也未改动这些网络模块。汇总见 `.cache/evidence/direct-ringer-verification.json`，最终完整日志见 `.cache/evidence/direct-ringer-make-check-final.log`。
+
+用户授权更新后，补齐 macOS 三种听筒的型号与序列号匹配；先写隔离测试并记录旧实现失败，再实现匹配。实际静默检查发现 Linux USB 声卡从 2 重编号为 1，新增先失败后通过的稳定 ALSA 标识测试，防止通话、铃声角色随编号交换；旧数字 ID 保持兼容。针对性竞态检查、静态检查与 8 项进程 E2E 通过。构建无测试音频标签的 macOS ARM64、Linux ARM64 原生程序，校验 SHA256 后将两端已安装程序及运行时更新至 `1.0.5-dev.ringer.20261113.2`。原房间密钥、成员地址和 direct 模式保持不变，原程序和配置备份在仓库 `.cache/deployment/direct-ringer/20261113-220146/`。
+
+最终角色为两端均使用 SPACETOUCH USB Audio 通话及播放／暂停功能键，本机用 Mac mini 内置扬声器响铃，远端 USB PnP 只作铃声输出。本机三个音频端点和 HID 在线。角色修正前曾完成两端真实机器的来电响铃／取消检查，原始状态在 `.cache/evidence/direct-ringer-deploy/native-ringing.json`；这些历史结果不代表当前角色或实体按键动作通过。用户随后要求 0.7 不发出任何声音，后续保持远端输出静音，不再拨号或播放验证。
+
+远端 USB PnP 曾拒绝配置（内核 `error -32`），当前缺少 ALSA 声卡接口，铃声端点离线。对实际 SPACETOUCH 使用稳定名称 `hw:CARD=Audio,DEV=0` 做无回放采集，2 秒得到完整 384000 字节、48 kHz 双声道 16 位 PCM，退出码 0；PCM 仅在远端内存中计量，未保存。其 HID 和播放接口在线，但 wirectl 双工会话的采集仍停流，不能将独立采集通过解释为通话已可用。远端固件仍报告 `throttled=0x50005`。最新静默状态、稳定标识测试和采集对照在 `.cache/evidence/direct-ringer-deploy/role-correction/`；完整双向通话仍未验收。
+
 ## 一对一直连电话与 USB 按键
 
 `python3 scripts/test-direct.py` 先于实现编写，并确认旧版本因不支持 `init --mode direct` 而失败。测试启动真实 CLI 进程、加密 UDP 连接和 TCP 配对；音频及按键输入使用仅在 `talk_test_audio` 构建标签中提供的测试驱动。结果、进程日志和各阶段 WAV 保留在 `.cache/direct-e2e/时间戳/`，可重复执行。`results.json` 保存场景状态，`network.json` 保存实际丢弃与乱序的数据包数量。

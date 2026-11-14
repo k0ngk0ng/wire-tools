@@ -25,6 +25,9 @@ err := client.Request(ctx, "GET", "/v1/status", nil, &status)
 |---|---|---|
 | `POST` | `/v1/update` | 安装统一最新版本；可传 `version`，或绝对路径 `archive`、`checksums`，成功后旧运行时退出 |
 | `GET` | `/v1/status` | 统一版本、PID、API 版本和能力列表 |
+| `GET` | `/v1/plugins` | 可选硬件插件列表及启用、在线状态 |
+| `GET` | `/v1/plugins/{sakshat\|spacetouch}` | 插件状态、当前通话状态、最近操作及硬件错误；SAKSHAT 还返回显示与按钮状态 |
+| `POST` | `/v1/plugins/{sakshat\|spacetouch}` | `{"enabled":true}` 或 `{"enabled":false}`，独立启停并保存；不修改 Talk 配对和音频选择 |
 | `GET` | `/v1/download/status` | 下载任务及引擎状态 |
 | `GET` | `/v1/download/config` | 隐藏 RPC secret 的配置概览 |
 | `POST` | `/v1/download/jobs` | `{"source":"HTTP(S)/magnet/ED2K/absolute torrent path"}`，返回任务 |
@@ -60,5 +63,7 @@ Connect 的创建及恢复是异步操作；按连接名称查询状态及 `pair
 `POST /v1/commands/{connect|download|talk}` 接受 `args`、调用者绝对工作目录 `directory` 和可选 `input`，以 NDJSON 流返回 `stream`/`data`，最终返回 `exit`。这个接口保留旧 CLI 的参数解析与文字输出，只调用同一可执行程序内的入口，不执行 PATH 插件或 shell。
 
 UI 应使用资源 API 获取状态和执行常见操作。部分维护命令和终端演示通过兼容接口保留；全屏面板在 CLI 端绘制，并通过资源 API 读写状态。
+
+硬件插件只通过资源 API 管理，不经终端兼容接口执行 PATH 插件或任意命令。插件默认禁用，启用状态保存在同一私有目录的 `plugins/NAME/config.json`。已启用的插件随运行时恢复；没有配置 Talk 时等待配置，不自动创建房间或拨号。插件停止和硬件失联不结束已有通话。详细的硬件依赖与按钮／显示行为见[硬件插件](../plugins/README.md)。
 
 `POST /v1/runtime/shutdown` 用于安装器和测试的有序退出，不是日常使用前提。`wirectl update` 是安装事务：校验并安装新程序及其依赖后，结束旧运行时；后续调用自动使用新版本。

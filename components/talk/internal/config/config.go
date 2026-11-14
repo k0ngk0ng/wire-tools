@@ -20,6 +20,7 @@ type Config struct {
 	Peers        []string           `json:"peers"`
 	Input        string             `json:"input,omitempty"`
 	Output       string             `json:"output,omitempty"`
+	RingOutput   string             `json:"ring_output,omitempty"`
 	Name         string             `json:"name,omitempty"`
 	ListenMuted  bool               `json:"listen_muted,omitempty"`
 	ActiveGroup  string             `json:"active_group,omitempty"`

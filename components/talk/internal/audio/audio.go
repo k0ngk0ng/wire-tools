@@ -28,6 +28,7 @@ type Audio struct {
 	Muted         atomic.Bool
 	OutputMuted   atomic.Bool
 	input, output *endpoint
+	ring          *endpoint
 	stop          chan struct{}
 	done          chan struct{}
 	workers       sync.WaitGroup
@@ -52,10 +53,28 @@ func List() ([]Device, error) {
 			if kind == malgo.Playback {
 				label = "output"
 			}
-			out = append(out, Device{label, d.ID.String(), d.Name(), d.IsDefault != 0})
+			out = append(out, Device{label, publicDeviceID(d.ID.String()), d.Name(), d.IsDefault != 0})
 		}
 	}
-	return out, nil
+	return append(out, additionalDevices()...), nil
+}
+
+// OpenWithRinger keeps the incoming alert on its own reconnecting endpoint.
+// An omitted/shared ring device preserves the original single-output behavior.
+func OpenWithRinger(input, output, ring string, capture func([]byte), playback func([]byte, []byte)) (*Audio, error) {
+	if output == "" && ring != "" {
+		// An explicit ID may refer to the system default call output. Avoid
+		// opening the same exclusive native device a second time in that case.
+		if devices, err := List(); err == nil {
+			for _, d := range devices {
+				if d.Kind == "output" && d.Default && d.ID == ring {
+					ring = ""
+					break
+				}
+			}
+		}
+	}
+	return openRoutedWithFactory(nativeFactory(nativeBackends()), input, output, ring, capture, playback), nil
 }
 
 func Open(input, output string, headphones bool, capture func([]byte), playback func([]byte)) (*Audio, error) {
@@ -69,11 +88,19 @@ func openWithBackends(backends []malgo.Backend, input, output string, headphones
 // The legacy headphones parameter is retained for config/API compatibility.
 // Playback must never gate capture: remote noise otherwise starves local speech.
 func openWithFactory(factory deviceFactory, input, output string, _ bool, capture func([]byte), playback func([]byte)) *Audio {
+	return openRoutedWithFactory(factory, input, output, "", capture, func(out, _ []byte) { playback(out) })
+}
+
+func openRoutedWithFactory(factory deviceFactory, input, output, ring string, capture func([]byte), playback func([]byte, []byte)) *Audio {
 	a := &Audio{stop: make(chan struct{}), done: make(chan struct{})}
 	a.input = newEndpoint(malgo.Capture, input)
 	a.output = newEndpoint(malgo.Playback, output)
-	for _, e := range []*endpoint{a.input, a.output} {
-		if e.snapshot().Disabled {
+	if ring != "" && ring != output {
+		a.ring = newEndpoint(malgo.Playback, ring)
+		a.ring.ringer = true
+	}
+	for _, e := range []*endpoint{a.input, a.output, a.ring} {
+		if e == nil || e.snapshot().Disabled {
 			continue
 		}
 		a.workers.Add(1)
@@ -86,6 +113,10 @@ func openWithFactory(factory deviceFactory, input, output string, _ bool, captur
 		ticker := time.NewTicker(time.Duration(room.FrameSamples) * time.Second / room.SampleRate)
 		defer ticker.Stop()
 		in, out := make([]byte, room.FrameBytes), make([]byte, room.FrameBytes)
+		var ring []byte
+		if a.ring != nil {
+			ring = make([]byte, room.FrameBytes)
+		}
 		for {
 			select {
 			case <-a.stop:
@@ -96,12 +127,16 @@ func openWithFactory(factory deviceFactory, input, output string, _ bool, captur
 					clear(in)
 				}
 				capture(in)
-				playback(out)
+				playback(out, ring)
 				if a.OutputMuted.Load() {
 					clear(out)
+					clear(ring)
 				}
 				if a.output.snapshot().Online {
 					a.output.pcm.write(out)
+				}
+				if a.ring != nil && a.ring.snapshot().Online {
+					a.ring.pcm.write(ring)
 				}
 			}
 		}
@@ -110,6 +145,13 @@ func openWithFactory(factory deviceFactory, input, output string, _ bool, captur
 }
 
 func (a *Audio) Devices() (DeviceState, DeviceState) { return a.input.snapshot(), a.output.snapshot() }
+func (a *Audio) RingDevice() *DeviceState {
+	if a.ring == nil {
+		return nil
+	}
+	s := a.ring.snapshot()
+	return &s
+}
 func (a *Audio) Close() {
 	a.once.Do(func() { close(a.stop) })
 	<-a.done

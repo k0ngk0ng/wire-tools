@@ -197,15 +197,38 @@ func (r *Room) directAudioLocked(p packet) ([]byte, bool) {
 
 // CallTone is local playback only: it never enters the network or recording.
 func (r *Room) CallTone(out []float64) {
+	r.CallToneRouted(out, nil)
+}
+
+// CallToneRouted sends incoming alerts to the separate ringer when configured.
+// Outgoing ringback remains in the handset, including in split-output mode.
+func (r *Room) CallToneRouted(out, ring []float64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	d := r.direct
 	if d == nil || d.state != 1 && d.state != 2 {
 		return
 	}
+	if d.state == 2 && ring != nil {
+		out = ring
+	}
 	for i := range out {
 		t := float64(d.tone) / SampleRate
-		if math.Mod(t, 3) < 1 {
+		if d.state == 2 {
+			// An incoming telephone ring is distinct from the caller's low
+			// ringback: two short bursts of a bright, alternating tone.
+			phase := math.Mod(t, 3)
+			if phase < .4 || phase >= .6 && phase < 1 {
+				frequency := 1100.0
+				if int(d.tone/(SampleRate/20))%2 != 0 {
+					frequency = 1500
+				}
+				part := float64(d.tone%(SampleRate/20)) / SampleRate
+				envelope := math.Min(1, math.Min(part/.005, (.05-part)/.005))
+				angle := 2 * math.Pi * frequency * t
+				out[i] += 3500 * envelope * (.75*math.Sin(angle) + .25*math.Sin(2*angle))
+			}
+		} else if math.Mod(t, 3) < 1 {
 			out[i] += 1000 * (math.Sin(2*math.Pi*440*t) + math.Sin(2*math.Pi*480*t))
 		}
 		d.tone++

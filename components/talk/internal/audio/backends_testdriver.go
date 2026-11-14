@@ -32,3 +32,24 @@ func deviceFault(kind malgo.DeviceType) error {
 	}
 	return nil
 }
+
+func ringDeviceFault() error {
+	if path := os.Getenv("WIRE_TALK_TEST_RING_OUTPUT_OFFLINE"); path != "" {
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf("test ring device unplugged")
+		}
+	}
+	return nil
+}
+
+// Separate native Null instances let process E2E observe each output's PCM.
+func additionalDevices() []Device {
+	return []Device{{Kind: "output", ID: "talk-test-ring-output", Name: "Test ring speaker"}}
+}
+
+func nativeDeviceSelection(kind malgo.DeviceType, id string) (string, string) {
+	if kind == malgo.Playback && id == "talk-test-ring-output" {
+		return "", "Test ring speaker"
+	}
+	return id, ""
+}

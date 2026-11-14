@@ -28,17 +28,20 @@ static void talk_input(void *context, IOReturn result, void *sender, IOHIDValueR
     h->value[i] = IOHIDValueGetIntegerValue(value);
 }
 
-static TalkHandset *talk_open(void) {
+static TalkHandset *talk_open(int vendor, int product, const char *serial) {
     TalkHandset *h = calloc(1, sizeof(TalkHandset));
     if (!h) return NULL;
     h->manager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
     if (!h->manager) { free(h); return NULL; }
     CFMutableDictionaryRef match = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-    int vendor = 0x001f, product = 0x0b23;
     CFNumberRef v = CFNumberCreate(NULL, kCFNumberIntType, &vendor);
     CFNumberRef p = CFNumberCreate(NULL, kCFNumberIntType, &product);
     CFDictionarySetValue(match, CFSTR(kIOHIDVendorIDKey), v);
     CFDictionarySetValue(match, CFSTR(kIOHIDProductIDKey), p);
+    if (serial && *serial) {
+        CFStringRef s = CFStringCreateWithCString(NULL, serial, kCFStringEncodingUTF8);
+        if (s) { CFDictionarySetValue(match, CFSTR(kIOHIDSerialNumberKey), s); CFRelease(s); }
+    }
     IOHIDManagerSetDeviceMatching(h->manager, match);
     CFRelease(match); CFRelease(v); CFRelease(p);
     IOHIDManagerRegisterInputValueCallback(h->manager, talk_input, h);
@@ -76,6 +79,7 @@ import (
 	"fmt"
 	"runtime"
 	"time"
+	"unsafe"
 )
 
 func (l *Listener) run(ctx context.Context) {
@@ -91,7 +95,23 @@ func (l *Listener) run(ctx context.Context) {
 			}
 			continue
 		}
-		h := C.talk_open()
+		vendor, product, serial, pinned := coreAudioHandset(l.audioIDs)
+		if !pinned {
+			vendor, product = 0x001f, 0x0b23
+		}
+		if pinned && vendor == 0 {
+			l.update(false, "configured audio device is not a supported USB handset")
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
+			continue
+		}
+		l.device = usbDeviceName(fmt.Sprintf("%04x", vendor), fmt.Sprintf("%04x", product))
+		cserial := C.CString(serial)
+		h := C.talk_open(C.int(vendor), C.int(product), cserial)
+		C.free(unsafe.Pointer(cserial))
 		if h == nil {
 			l.update(false, "cannot create USB HID listener")
 		} else if h.result != 0 {

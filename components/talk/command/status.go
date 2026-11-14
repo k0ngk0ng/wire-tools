@@ -15,7 +15,6 @@ import (
 	"github.com/k0ngk0ng/wire-tools/components/talk/internal/audio"
 	"github.com/k0ngk0ng/wire-tools/components/talk/internal/control"
 	"github.com/k0ngk0ng/wire-tools/components/talk/internal/groups"
-	"github.com/k0ngk0ng/wire-tools/components/talk/internal/handset"
 	"github.com/k0ngk0ng/wire-tools/components/talk/internal/media"
 	"github.com/k0ngk0ng/wire-tools/components/talk/internal/room"
 	"github.com/k0ngk0ng/wire-tools/components/talk/internal/service"
@@ -23,21 +22,21 @@ import (
 
 type sessionStatus struct {
 	Configured   *bool           `json:"configured,omitempty"`
-	Handset      handset.Status  `json:"handset"`
 	OutputGainDB float64         `json:"output_gain_db"`
 	GroupID      string          `json:"room_id"`
 	GroupName    string          `json:"room_name"`
 	Groups       []groups.Status `json:"groups"`
 	Media        media.Status    `json:"media"`
 	room.Status
-	InputDevice  *audio.DeviceState `json:"input_device,omitempty"`
-	OutputDevice *audio.DeviceState `json:"output_device,omitempty"`
-	Input        string             `json:"input"`
-	Output       string             `json:"output"`
-	Muted        bool               `json:"muted"`
-	OutputMuted  bool               `json:"output_muted"`
-	Started      time.Time          `json:"started"`
-	Version      string             `json:"version"`
+	InputDevice      *audio.DeviceState `json:"input_device,omitempty"`
+	OutputDevice     *audio.DeviceState `json:"output_device,omitempty"`
+	RingOutputDevice *audio.DeviceState `json:"ring_output_device,omitempty"`
+	Input            string             `json:"input"`
+	Output           string             `json:"output"`
+	Muted            bool               `json:"muted"`
+	OutputMuted      bool               `json:"output_muted"`
+	Started          time.Time          `json:"started"`
+	Version          string             `json:"version"`
 }
 
 func status(ctx context.Context, dir string, watch bool, args []string) error {
@@ -145,13 +144,15 @@ func printStatus(s sessionStatus, watch bool) {
 	fmt.Printf("State:       Online\nMicrophone:  %s (%s)\nOutput:      %s (%s)\nListen:      %s\nUptime:      %s\nVersion:     %s\n",
 		cleanText(s.Input), mic, cleanText(s.Output), output, cleanText(s.Listen), uptime, cleanText(s.Version))
 	fmt.Printf("Output gain: %+.1f dB\n", s.OutputGainDB)
+	if s.RingOutputDevice != nil {
+		state := "online"
+		if !s.RingOutputDevice.Online {
+			state = "offline; reconnecting"
+		}
+		fmt.Printf("Ringtone:    %s (%s)\n", cleanText(s.RingOutputDevice.Name), state)
+	}
 	if s.Call != nil {
 		fmt.Printf("Connection:  direct · %s\n", s.Call.State)
-		if s.Handset.Online {
-			fmt.Printf("Handset:     %s · buttons online\n", cleanText(s.Handset.Device))
-		} else {
-			fmt.Printf("Handset:     %s\n", cleanText(s.Handset.Error))
-		}
 	}
 	if s.GroupID != "" {
 		fmt.Printf("Room:        %s (%s) · current speaking room\n", cleanText(s.GroupName), s.GroupID)

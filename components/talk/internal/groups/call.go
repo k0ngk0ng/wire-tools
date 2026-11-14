@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-
-	"github.com/k0ngk0ng/wire-tools/components/talk/internal/config"
 )
 
 func (m *Manager) CallAction(ref, action string) error {
@@ -23,33 +21,6 @@ func (m *Manager) CallAction(ref, action string) error {
 		return fmt.Errorf("select the connection with group use before controlling its call")
 	}
 	return m.rooms[g.ID()].r.CallAction(action)
-}
-
-func (m *Manager) Handset(action string) error {
-	if action == "button" {
-		return m.CallAction("", action)
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.closed {
-		return fmt.Errorf("session stopped")
-	}
-	delta := 2.0
-	if action == "volume-down" {
-		delta = -2
-	} else if action != "volume-up" {
-		return fmt.Errorf("unknown handset action")
-	}
-	db := max(-60, min(24, m.cfg.OutputGainDB+delta))
-	next, err := m.cfg.Changed(config.GroupChange{Action: "output-gain", GainDB: &db})
-	if err != nil {
-		return err
-	}
-	if err := config.Rewrite(m.dir, next); err != nil {
-		return err
-	}
-	m.cfg = next
-	return nil
 }
 
 func (m *Manager) serveCall(w http.ResponseWriter, r *http.Request) {

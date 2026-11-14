@@ -57,7 +57,7 @@ func TestDevice(ctx context.Context, kind, id string, report func(string, Level)
 	var deviceID unsafe.Pointer
 	name := ""
 	for _, d := range ds {
-		if (id == "" && d.IsDefault != 0) || d.ID.String() == id {
+		if (id == "" && d.IsDefault != 0) || d.ID.String() == id || publicDeviceID(d.ID.String()) == id {
 			deviceID = d.ID.Pointer()
 			name = d.Name()
 			break

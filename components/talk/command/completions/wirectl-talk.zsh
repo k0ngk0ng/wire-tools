@@ -113,7 +113,11 @@ _wirectl_talk_completion() {
         devices)
             _arguments -s \
                 '--json[output JSON for scripts]' \
-                '--state-dir[configuration directory]:directory:_files -/'
+                '--input[microphone device ID]:device ID:' \
+                '--output[call output device ID]:device ID:' \
+                '--ring-output[incoming ringtone device ID]:device ID:' \
+                '--state-dir[configuration directory]:directory:_files -/' \
+                '1:action:(set)'
             ;;
         init)
             _arguments -s \
@@ -121,6 +125,7 @@ _wirectl_talk_completion() {
                 '--listen[UDP listen address]:address:' \
                 '--input[input device ID]:device ID:' \
                 '--output[output device ID]:device ID:' \
+                '--ring-output[incoming ringtone device ID]:device ID:' \
                 '--headphones[legacy compatibility option]' \
                 '--key-file[read a room key from a private file]:file:_files' \
                 '--peers[comma-separated reachable UDP addresses]:addresses:' \
@@ -132,6 +137,7 @@ _wirectl_talk_completion() {
                 '--listen[local UDP listen address]:address:' \
                 '--input[input device ID]:device ID:' \
                 '--output[output device ID]:device ID:' \
+                '--ring-output[incoming ringtone device ID]:device ID:' \
                 '--headphones[legacy compatibility option]' \
                 '--state-dir[configuration directory]:directory:_files -/' \
                 '1:inviter host and port:'

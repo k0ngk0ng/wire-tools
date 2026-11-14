@@ -1,0 +1,5 @@
+class SAKSPins:
+    IC_TM1637_DI = 25
+    IC_TM1637_CLK = 5
+    TACT_LEFT = 16
+    TACT_RIGHT = 20

@@ -24,6 +24,7 @@ import (
 	"github.com/k0ngk0ng/wire-tools/components/download"
 	"github.com/k0ngk0ng/wire-tools/components/talk"
 	"github.com/k0ngk0ng/wire-tools/internal/state"
+	"github.com/k0ngk0ng/wire-tools/plugins"
 )
 
 func Authenticate(token string, next http.Handler) http.Handler {
@@ -86,13 +87,14 @@ func Run(ctx context.Context, home, version string) error {
 	conn := connect.New(ctx, filepath.Join(home, "connect"), version)
 	down := download.New(ctx, filepath.Join(home, "download"), version)
 	voice := talk.New(ctx, filepath.Join(home, "talk"), version)
+	hardware := plugins.New(ctx, home)
 	var closeOnce sync.Once
 	closeResources := func() {
 		closeOnce.Do(func() {
 			for _, resource := range []struct {
 				name  string
 				close func() error
-			}{{"talk", voice.Close}, {"download", down.Close}, {"connect", conn.Close}} {
+			}{{"plugins", hardware.Close}, {"talk", voice.Close}, {"download", down.Close}, {"connect", conn.Close}} {
 				if err := resource.close(); err != nil {
 					fmt.Fprintln(os.Stderr, resource.name, "shutdown:", err)
 				}
@@ -102,7 +104,7 @@ func Run(ctx context.Context, home, version string) error {
 	defer closeResources()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
-		JSON(w, 200, map[string]any{"version": version, "pid": os.Getpid(), "api_version": "v1", "features": []string{"connect", "download", "talk"}})
+		JSON(w, 200, map[string]any{"version": version, "pid": os.Getpid(), "api_version": "v1", "features": []string{"connect", "download", "talk", "plugins"}})
 	})
 	mux.HandleFunc("POST /v1/update", UpdateHandler(cancel))
 	mux.HandleFunc("POST /v1/runtime/shutdown", func(w http.ResponseWriter, r *http.Request) {
@@ -112,6 +114,8 @@ func Run(ctx context.Context, home, version string) error {
 	mux.Handle("/v1/connect/", http.StripPrefix("/v1/connect", conn))
 	mux.Handle("/v1/download/", http.StripPrefix("/v1/download", down))
 	mux.Handle("/v1/talk/", http.StripPrefix("/v1/talk", voice))
+	mux.Handle("/v1/plugins", http.StripPrefix("/v1/plugins", hardware))
+	mux.Handle("/v1/plugins/", http.StripPrefix("/v1/plugins", hardware))
 	mux.HandleFunc("POST /v1/commands/{feature}", Bridge(home, version))
 	server := &http.Server{Handler: Authenticate(ep.Token, mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
 	data, _ := json.MarshalIndent(ep, "", "  ")
@@ -139,6 +143,7 @@ func Run(ctx context.Context, home, version string) error {
 	}
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
+	hardware.StartConfigured()
 	select {
 	case <-ctx.Done():
 	case err = <-done:

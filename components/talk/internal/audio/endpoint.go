@@ -45,6 +45,7 @@ type deviceFactory func(malgo.DeviceType, string, malgo.DeviceCallbacks) (device
 type endpoint struct {
 	kind   malgo.DeviceType
 	id     string
+	ringer bool
 	state  atomic.Pointer[DeviceState]
 	pcm    pcmQueue
 	levels levelWindow
@@ -148,7 +149,7 @@ func (e *endpoint) run(stop <-chan struct{}, factory deviceFactory) {
 		}
 		var d deviceHandle
 		var name string
-		err := deviceFault(e.kind)
+		err := e.fault()
 		if err == nil {
 			d, name, err = factory(e.kind, e.id, callbacks)
 		}
@@ -164,7 +165,7 @@ func (e *endpoint) run(stop <-chan struct{}, factory deviceFactory) {
 					err = fmt.Errorf("device disconnected; retrying")
 					active = false
 				case <-watchdog.C:
-					if fault := deviceFault(e.kind); fault != nil {
+					if fault := e.fault(); fault != nil {
 						err = fault
 						active = false
 						break
@@ -193,6 +194,15 @@ func (e *endpoint) run(stop <-chan struct{}, factory deviceFactory) {
 	}
 }
 
+func (e *endpoint) fault() error {
+	if e.ringer {
+		if err := ringDeviceFault(); err != nil {
+			return err
+		}
+	}
+	return deviceFault(e.kind)
+}
+
 type nativeDevice struct {
 	context *malgo.AllocatedContext
 	device  *malgo.Device
@@ -201,6 +211,7 @@ type nativeDevice struct {
 func (d *nativeDevice) Close() { d.device.Uninit(); d.context.Uninit(); d.context.Free() }
 func nativeFactory(backends []malgo.Backend) deviceFactory {
 	return func(kind malgo.DeviceType, id string, callbacks malgo.DeviceCallbacks) (deviceHandle, string, error) {
+		id, alias := nativeDeviceSelection(kind, id)
 		ctx, err := malgo.InitContext(backends, malgo.ContextConfig{}, nil)
 		if err != nil {
 			return nil, "", err
@@ -216,7 +227,7 @@ func nativeFactory(backends []malgo.Backend) deviceFactory {
 		cfg.PeriodSizeInFrames = room.FrameSamples
 		name := ""
 		for _, d := range devices {
-			if (id == "" && d.IsDefault != 0) || d.ID.String() == id {
+			if (id == "" && d.IsDefault != 0) || d.ID.String() == id || publicDeviceID(d.ID.String()) == id {
 				ptr := d.ID.Pointer()
 				defer freeDeviceID(ptr)
 				if kind == malgo.Capture {
@@ -230,6 +241,9 @@ func nativeFactory(backends []malgo.Backend) deviceFactory {
 		}
 		if name == "" {
 			return fail(fmt.Errorf("configured device unavailable; reconnect it or select a device with talk devices"))
+		}
+		if alias != "" {
+			name = alias
 		}
 		cfg.Capture.Format = malgo.FormatS16
 		cfg.Capture.Channels = 1

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 
+sys.dont_write_bytecode = True
 from shell_tools import find_bash
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -16,7 +17,7 @@ def main():
     parser.add_argument('--build-only',action='store_true')
     parser.add_argument('--go-only',action='store_true')
     args=parser.parse_args()
-    env=dict(os.environ,CGO_ENABLED='1',GOWORK='off',GOTELEMETRY='off')
+    env=dict(os.environ,CGO_ENABLED='1',GOWORK='off',GOTELEMETRY='off',PYTHONDONTWRITEBYTECODE='1')
     for key,folder in {'GOCACHE':'go-build','GOMODCACHE':'go-mod','GOPATH':'go',
                        'GOTMPDIR':'tmp','TMPDIR':'tmp','TEMP':'tmp','TMP':'tmp'}.items():
         path=ROOT/'.cache'/folder
@@ -63,6 +64,7 @@ def main():
     run('e2e',[sys.executable,'tests/e2e/test_unified.py'],fatal=False)
     run('download-e2e',[sys.executable,'tests/e2e/test_download_api.py'],fatal=False)
     run('talk-e2e',[sys.executable,'tests/e2e/test_talk_api.py'],fatal=False)
+    run('plugins-e2e',[sys.executable,'tests/e2e/test_plugins_api.py'],fatal=False)
     run('update-e2e',[sys.executable,'tests/e2e/test_update.py'],fatal=False)
     run('connect-cli-e2e',[sys.executable,'tests/e2e/test_connect_cli.py'],fatal=False)
     run('terminal-e2e',[sys.executable,'tests/e2e/test_terminal.py'],fatal=False)

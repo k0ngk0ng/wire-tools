@@ -80,7 +80,8 @@ _wirectl_talk_completion() {
             COMPREPLY=( $(compgen -W "$options" -- "$cur") )
             ;;
         devices)
-            COMPREPLY=( $(compgen -W "--json --state-dir --help" -- "$cur") )
+            case "$prev" in --input|--output|--ring-output) return 0 ;; esac
+            COMPREPLY=( $(compgen -W "set --json --input --output --ring-output --state-dir --help" -- "$cur") )
             ;;
         init)
             if [[ "$prev" == --mode ]]; then COMPREPLY=( $(compgen -W "room direct" -- "$cur") ); return 0; fi
@@ -90,16 +91,16 @@ _wirectl_talk_completion() {
                     return 0
                     ;;
             esac
-            options="--mode --listen --input --output --headphones --key-file --peers --state-dir --help"
+            options="--mode --listen --input --output --ring-output --headphones --key-file --peers --state-dir --help"
             COMPREPLY=( $(compgen -W "$options" -- "$cur") )
             ;;
         pair|join)
             case "$prev" in
-                --code|--listen|--input|--output|--peers)
+                --code|--listen|--input|--output|--ring-output|--peers)
                     return 0
                     ;;
             esac
-            options="--code --listen --input --output --headphones --state-dir --help"
+            options="--code --listen --input --output --ring-output --headphones --state-dir --help"
             COMPREPLY=( $(compgen -W "$options" -- "$cur") )
             ;;
         status|watch)

@@ -13,18 +13,20 @@ type Status struct {
 }
 
 type Listener struct {
-	cancel  context.CancelFunc
-	done    chan struct{}
-	state   atomic.Pointer[Status]
-	pressed map[uint32]bool
-	action  func(string)
-	enabled func() bool
-	device  string
+	cancel   context.CancelFunc
+	done     chan struct{}
+	state    atomic.Pointer[Status]
+	pressed  map[uint32]bool
+	action   func(string)
+	enabled  func() bool
+	device   string
+	audioIDs []string
 }
 
-func Start(ctx context.Context, enabled func() bool, action func(string)) *Listener {
+func Start(ctx context.Context, enabled func() bool, action func(string), audioIDs ...string) *Listener {
 	ctx, cancel := context.WithCancel(ctx)
 	l := &Listener{cancel: cancel, done: make(chan struct{}), pressed: map[uint32]bool{}, action: action, enabled: enabled, device: "AB17X USB Audio"}
+	l.audioIDs = append([]string(nil), audioIDs...)
 	l.update(false, "waiting for device")
 	go func() { defer close(l.done); l.run(ctx) }()
 	return l

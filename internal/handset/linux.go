@@ -20,14 +20,22 @@ func (l *Listener) run(ctx context.Context) {
 		fd := -1
 		message := "supported USB handset disconnected; waiting to reconnect"
 		if l.enabled() {
+			selected, pinned := selectedUSBRoot(l.audioIDs, "/sys/class/sound")
+			if pinned {
+				message = "configured USB handset disconnected or unsupported; waiting to reconnect"
+			}
 			paths, _ := filepath.Glob("/sys/class/input/event*/device/id/vendor")
 			for _, path := range paths {
+				if pinned && (selected == "" || usbDeviceRoot(filepath.Dir(filepath.Dir(path))) != selected) {
+					continue
+				}
 				read := func(name string) string {
 					b, _ := os.ReadFile(filepath.Join(filepath.Dir(path), name))
 					return strings.TrimSpace(string(b))
 				}
 				vendor, product, bus := read("vendor"), read("product"), read("bustype")
-				if bus != "0003" || !(vendor == "001f" && product == "0b23" || vendor == "0c76" && product == "1203") {
+				name := usbDeviceName(vendor, product)
+				if bus != "0003" || name == "" {
 					continue
 				}
 				event := filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(path))))
@@ -44,11 +52,7 @@ func (l *Listener) run(ctx context.Context) {
 					message = fmt.Sprintf("cannot claim USB buttons: %v", err)
 					continue
 				}
-				if vendor == "0c76" {
-					l.device = "USB PnP Audio Device"
-				} else {
-					l.device = "AB17X USB Audio"
-				}
+				l.device = name
 				break
 			}
 		} else {

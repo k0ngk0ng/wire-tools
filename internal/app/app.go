@@ -29,6 +29,7 @@ Usage: wirectl [--state-dir DIR] <command> [arguments]
   connect      Pair devices and manage encrypted connections
   download     Download a URL, magnet, torrent or ED2K link
   talk         Conversations, rooms and audio devices
+  plugin       Optional hardware controllers: sakshat, spacetouch
   update       Update the whole installation to the latest release
   api          Inspect or call the local resource API
   completion   Print bash or zsh completion
@@ -108,6 +109,8 @@ func Run(ctx context.Context, args []string, version string) error {
 		return apiCommand(ctx, c, args[1:])
 	case "completion":
 		return completion(args[1:])
+	case "plugin":
+		return pluginCommand(ctx, c, args[1:])
 	case "connect", "download", "talk":
 		feature := args[0]
 		tail := args[1:]
@@ -270,9 +273,9 @@ func completion(args []string) error {
 	}
 	switch args[0] {
 	case "bash":
-		fmt.Println("complete -W 'connect download talk update api version completion' wirectl")
+		fmt.Println("complete -W 'connect download talk plugin update api version completion' wirectl")
 	case "zsh":
-		fmt.Println("#compdef wirectl\n_arguments '1:command:(connect download talk update api version completion)' '*::argument:->args'")
+		fmt.Println("#compdef wirectl\n_arguments '1:command:(connect download talk plugin update api version completion)' '*::argument:->args'")
 	default:
 		return errors.New("supported shells: bash, zsh")
 	}

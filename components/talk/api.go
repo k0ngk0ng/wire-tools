@@ -30,6 +30,7 @@ type ConfigRequest struct {
 	Listen     string   `json:"listen,omitempty"`
 	Input      string   `json:"input,omitempty"`
 	Output     string   `json:"output,omitempty"`
+	RingOutput string   `json:"ring_output,omitempty"`
 	Name       string   `json:"name,omitempty"`
 	Peers      []string `json:"peers,omitempty"`
 	Headphones bool     `json:"headphones,omitempty"`
@@ -39,6 +40,13 @@ type PairRequest struct {
 	ConfigRequest
 	Address string `json:"address"`
 	Code    string `json:"code"`
+}
+
+// DeviceChange only changes local audio routing, preserving the saved room.
+type DeviceChange struct {
+	Input      *string `json:"input,omitempty"`
+	Output     *string `json:"output,omitempty"`
+	RingOutput *string `json:"ring_output,omitempty"`
 }
 
 type InvitationRequest struct {
@@ -184,6 +192,7 @@ func (c ConfigRequest) apply(current *config.Config) {
 		current.Listen = c.Listen
 	}
 	current.Mode, current.Input, current.Output = c.Mode, c.Input, c.Output
+	current.RingOutput = c.RingOutput
 	current.Headphones, current.Name = c.Headphones, c.Name
 	if c.Peers != nil {
 		current.Peers = c.Peers
@@ -194,7 +203,7 @@ func redacted(c config.Config) map[string]any {
 	for _, g := range c.RoomConfigs() {
 		groups = append(groups, map[string]any{"id": g.ID(), "name": g.Name, "mode": g.Mode, "listen": g.Listen, "peers": g.Peers, "listen_muted": g.Muted})
 	}
-	return map[string]any{"configured": true, "mode": c.Mode, "listen": c.Listen, "input": c.Input, "output": c.Output, "groups": groups, "active_group": c.CurrentID(), "output_gain_db": c.OutputGainDB}
+	return map[string]any{"configured": true, "mode": c.Mode, "listen": c.Listen, "input": c.Input, "output": c.Output, "ring_output": c.RingOutput, "groups": groups, "active_group": c.CurrentID(), "output_gain_db": c.OutputGainDB}
 }
 
 func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -232,8 +241,24 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			respond(w, 201, redacted(c))
+		case "PATCH":
+			var change DeviceChange
+			if err := decode(w, r, &change); err != nil {
+				fail(w, 400, err)
+				return
+			}
+			if change.Input == nil && change.Output == nil && change.RingOutput == nil {
+				fail(w, 400, errors.New("provide input, output or ring_output"))
+				return
+			}
+			c, err := m.changeDevices(r.Context(), change)
+			if err != nil {
+				fail(w, 409, err)
+				return
+			}
+			respond(w, 200, redacted(c))
 		default:
-			w.Header().Set("Allow", "GET, POST")
+			w.Header().Set("Allow", "GET, POST, PATCH")
 			w.WriteHeader(405)
 		}
 	case "/session":
@@ -374,6 +399,37 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (m *Manager) changeDevices(ctx context.Context, change DeviceChange) (config.Config, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var c config.Config
+	if m.closed {
+		return c, errors.New("talk runtime is closed")
+	}
+	if _, err := control.RequestDirectBody(ctx, m.dir, "GET", "/status", nil); err == nil {
+		return c, errors.New("disconnect the audio session with wirectl talk leave before changing devices")
+	}
+	unlock, err := control.Lock(m.dir)
+	if err != nil {
+		return c, err
+	}
+	defer unlock()
+	c, err = config.Load(m.dir)
+	if err != nil {
+		return c, err
+	}
+	if change.Input != nil {
+		c.Input = *change.Input
+	}
+	if change.Output != nil {
+		c.Output = *change.Output
+	}
+	if change.RingOutput != nil {
+		c.RingOutput = *change.RingOutput
+	}
+	return c, config.Rewrite(m.dir, c)
 }
 
 func (m *Manager) forward(w http.ResponseWriter, r *http.Request, method, path string, body []byte) {

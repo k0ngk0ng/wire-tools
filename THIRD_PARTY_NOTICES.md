@@ -13,3 +13,9 @@ license texts for bundled dependencies. aria2, aMule, FFmpeg and supporting
 libraries have their own licenses; full distributions include corresponding
 source archives and the exact build recipes. Downloaded tools and runtime
 state are not part of the source import.
+
+The optional `sakshat` hardware plugin communicates with an independently
+installed Python SAKS SDK in a subprocess. SAKS SDK is copyright NXEZ.COM,
+licensed under GPL-2.0: https://github.com/nxez/SAKS-SDK. Its implementation is
+not copied into or linked into the wirectl executable. The board SDK and
+RPi.GPIO remain optional system dependencies on the Raspberry Pi.

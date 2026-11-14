@@ -27,6 +27,12 @@ wirectl talk join
 wirectl talk mute
 wirectl talk leave
 
+# 可选硬件插件；在对应硬件所在机器上启用
+wirectl plugin list
+wirectl plugin enable sakshat
+wirectl plugin enable spacetouch
+wirectl plugin status sakshat --json
+
 # 设备连接；setup 安装特权网络 helper，需要管理员授权
 wirectl connect setup
 wirectl connect login vpn.example.com
@@ -39,6 +45,8 @@ wirectl update
 ```
 
 Connect 需要自行部署公网会合及中继服务器，并完成服务器授权。Talk 需要可达的对端地址；原生构建使用实际音频设备。两者的连接协议、安全限制和详细命令分别见 [Connect](components/connect/README.md)、[Talk](components/talk/README.md)。下载协议、视频和搜索见 [Download](components/download/README.md)。
+
+硬件控制作为可选插件独立启停：树莓派 SAKS 板使用 `sakshat`，Mac mini 等机器的 USB 听筒使用 `spacetouch`。插件和 Talk 通过本地 API 协作，板卡引脚、按钮与数码管配置不放进 Talk。用法、依赖和验收边界见[硬件插件](plugins/README.md)。
 
 ## 安装与平台
 

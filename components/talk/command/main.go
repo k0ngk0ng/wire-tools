@@ -15,7 +15,6 @@ import (
 	"github.com/k0ngk0ng/wire-tools/components/talk/internal/config"
 	"github.com/k0ngk0ng/wire-tools/components/talk/internal/control"
 	"github.com/k0ngk0ng/wire-tools/components/talk/internal/groups"
-	"github.com/k0ngk0ng/wire-tools/components/talk/internal/handset"
 )
 
 var version = "dev"
@@ -58,10 +57,15 @@ func run(ctx context.Context, args []string) error {
 			fmt.Println(version)
 			return nil
 		}),
-		"init":    cmd("Create room config (never overwrites)", func(_ context.Context, a []string) error { return initConfig(dir, a) }),
-		"invite":  cmd("Generate a one-use pairing code (5 minutes)", func(c context.Context, a []string) error { return inviteCommand(c, dir, a) }),
-		"pair":    cmd("Save a room using HOST:PORT --code CODE, without starting audio", func(c context.Context, a []string) error { return pairCommand(c, dir, a) }),
-		"devices": cmd("List audio devices in a table; --json for scripts", func(_ context.Context, a []string) error { return devicesCommand(a) }),
+		"init":   cmd("Create room config (never overwrites)", func(_ context.Context, a []string) error { return initConfig(dir, a) }),
+		"invite": cmd("Generate a one-use pairing code (5 minutes)", func(c context.Context, a []string) error { return inviteCommand(c, dir, a) }),
+		"pair":   cmd("Save a room using HOST:PORT --code CODE, without starting audio", func(c context.Context, a []string) error { return pairCommand(c, dir, a) }),
+		"devices": cmd("List audio devices or set local audio routing", func(c context.Context, a []string) error {
+			if len(a) > 0 && a[0] == "set" {
+				return setDevicesCommand(c, dir, a[1:])
+			}
+			return devicesCommand(a)
+		}),
 		"join": cmd("Join HOST:PORT --code CODE, or connect the saved room", func(c context.Context, a []string) error {
 			if len(a) > 0 {
 				if err := pairCommand(c, dir, a); err != nil {
@@ -100,6 +104,7 @@ func initConfig(dir string, args []string) error {
 	fs.StringVar(&c.Listen, "listen", c.Listen, "UDP listen address")
 	fs.StringVar(&c.Input, "input", "", "input device ID, or none for file-only input (default device when empty)")
 	fs.StringVar(&c.Output, "output", "", "output device ID (default device when empty)")
+	fs.StringVar(&c.RingOutput, "ring-output", "", "incoming ringtone output device ID (uses call output when empty)")
 	fs.BoolVar(&c.Headphones, "headphones", false, "legacy compatibility option; audio is always full duplex")
 	keyFile := fs.String("key-file", "", "read another member's room key from a private file")
 	peers := fs.String("peers", "", "comma-separated reachable UDP host:port addresses")
@@ -159,7 +164,7 @@ func joinVersion(ctx context.Context, dir, version string) (result error) {
 		return err
 	}
 	defer m.Close()
-	a, err := audio.Open(c.Input, c.Output, c.Headphones, m.Capture, m.Playback)
+	a, err := audio.OpenWithRinger(c.Input, c.Output, c.RingOutput, m.Capture, m.PlaybackWithRinger)
 	if err != nil {
 		return err
 	}
@@ -182,19 +187,6 @@ func joinVersion(ctx context.Context, dir, version string) (result error) {
 		}
 	})
 	started := time.Now()
-	keys := handset.Start(ctx, func() bool {
-		for _, g := range m.Snapshot().Groups {
-			if g.Current {
-				return g.Mode == "direct"
-			}
-		}
-		return false
-	}, func(action string) {
-		if err := m.Handset(action); err != nil {
-			fmt.Fprintln(os.Stderr, "Handset:", err)
-		}
-	})
-	defer keys.Close()
 	api, err := control.Start(dir, func() any {
 		input, output := a.Devices()
 		snapshot := m.Snapshot()
@@ -205,7 +197,7 @@ func joinVersion(ctx context.Context, dir, version string) (result error) {
 				break
 			}
 		}
-		return sessionStatus{Handset: keys.Status(), OutputGainDB: snapshot.OutputGainDB, Status: current.Status, GroupID: current.RoomID, GroupName: current.Name, Groups: snapshot.Groups, Input: input.Name, Output: output.Name, InputDevice: &input, OutputDevice: &output, Muted: a.Muted.Load(), OutputMuted: a.OutputMuted.Load(), Started: started, Version: version, Media: current.Media}
+		return sessionStatus{OutputGainDB: snapshot.OutputGainDB, Status: current.Status, GroupID: current.RoomID, GroupName: current.Name, Groups: snapshot.Groups, Input: input.Name, Output: output.Name, InputDevice: &input, OutputDevice: &output, RingOutputDevice: a.RingDevice(), Muted: a.Muted.Load(), OutputMuted: a.OutputMuted.Load(), Started: started, Version: version, Media: current.Media}
 	}, cancel, func(m bool) { a.Muted.Store(m) }, func(m bool) { a.OutputMuted.Store(m) }, m, m, m)
 	if err != nil {
 		return err

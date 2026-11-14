@@ -23,3 +23,7 @@ func nativeBackends() []malgo.Backend {
 func beforeDeviceClose() {}
 
 func deviceFault(kind malgo.DeviceType) error { return nil }
+
+func ringDeviceFault() error                                               { return nil }
+func additionalDevices() []Device                                          { return nil }
+func nativeDeviceSelection(_ malgo.DeviceType, id string) (string, string) { return id, "" }
